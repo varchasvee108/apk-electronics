@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { partDef, pinPositions } from '@/model/parts';
-import { newId, samePt, type CircuitDoc, type PartInstance, type ProbeKind, type Pt, type Rot, type Wire } from '@/model/types';
+import { holeAt } from '@/model/breadboard';
+import { newId, ptKey, samePt, type CircuitDoc, type PartInstance, type ProbeKind, type Pt, type Rot, type Wire } from '@/model/types';
 import { saveCircuit } from './db';
 
 export type Tool = 'select' | 'wire' | 'probe' | 'multi';
@@ -30,6 +31,8 @@ interface CircuitState {
   load(doc: CircuitDoc): void;
   /** Mutate the document. `key` coalesces repeated edits (slider drags) into one undo step. */
   apply(fn: (d: CircuitDoc) => void, key?: string): void;
+  /** Mutate the document without an undo step or marking it edited (momentary controls). */
+  applyLive(fn: (d: CircuitDoc) => void): void;
   undo(): void;
   redo(): void;
   select(sel: Partial<Selection>, add?: boolean): void;
@@ -46,7 +49,7 @@ interface CircuitState {
   rotateSelection(): void;
   deleteSelection(): void;
   duplicateSelection(): void;
-  setProp(partId: string, key: string, value: number | string | boolean, coalesce?: boolean): void;
+  setProp(partId: string, key: string, value: number | string | boolean, mode?: 'coalesce' | 'live'): void;
   addWire(a: Pt, b: Pt): string | null;
   setWireColorFor(ids: string[], color: string): void;
   moveWireEnd(id: string, end: 'a' | 'b', to: Pt): void;
@@ -56,6 +59,45 @@ interface CircuitState {
 }
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+function centroid(pts: Pt[]): Pt {
+  const n = Math.max(1, pts.length);
+  return { x: pts.reduce((a, q) => a + q.x, 0) / n, y: pts.reduce((a, q) => a + q.y, 0) / n };
+}
+
+function pinsOf(d: CircuitDoc, ids: Set<string>): Map<string, Pt[]> {
+  return new Map(d.parts.filter((p) => ids.has(p.id)).map((p) => [p.id, pinPositions(p).map(({ x, y }) => ({ x, y }))]));
+}
+
+/**
+ * After parts moved or rotated, bring along the wire ends that were attached to their pins:
+ * always in a schematic, for pins that sit outside the breadboard (battery, supply, Arduino headers),
+ * and for wires whose two ends both belong to moved parts. Wires plugged into breadboard holes stay put.
+ */
+function carryWires(d: CircuitDoc, before: Map<string, Pt[]>): void {
+  const moved = new Map<string, Pt>();
+  const loose = new Set<string>();
+  for (const p of d.parts) {
+    const old = before.get(p.id);
+    if (!old) continue;
+    const now = pinPositions(p);
+    old.forEach((o, k) => {
+      const key = ptKey(o);
+      moved.set(key, { x: now[k].x, y: now[k].y });
+      if (d.board === 'none' || !holeAt(o)) loose.add(key);
+    });
+  }
+  for (const w of d.wires) {
+    const ka = ptKey(w.a);
+    const kb = ptKey(w.b);
+    const both = moved.has(ka) && moved.has(kb);
+    const na = moved.get(ka);
+    const nb = moved.get(kb);
+    if (na && (both || loose.has(ka))) w.a = na;
+    if (nb && (both || loose.has(kb))) w.b = nb;
+  }
+  d.wires = d.wires.filter((w) => !samePt(w.a, w.b));
+}
 const HISTORY = 100;
 
 export const useCircuit = create<CircuitState>((set, get) => ({
@@ -100,6 +142,12 @@ export const useCircuit = create<CircuitState>((set, get) => ({
       lastKey: key ?? null,
       dirty: true,
     });
+  },
+
+  applyLive(fn) {
+    const next = clone(get().doc);
+    fn(next);
+    set({ doc: next, lastKey: null });
   },
 
   undo() {
@@ -154,27 +202,14 @@ export const useCircuit = create<CircuitState>((set, get) => ({
     if (!dx && !dy) return;
     const moving = new Set(ids);
     get().apply((d) => {
-      // wires whose both ends sit on pins of the moved parts move along with them
-      const pinPts = d.parts.filter((p) => moving.has(p.id)).flatMap((p) => pinPositions(p));
-      const onMoved = (q: Pt) => pinPts.some((pp) => samePt(pp, q));
-      for (const w of d.wires) {
-        const a = onMoved(w.a);
-        const bb = onMoved(w.b);
-        if (a && bb) {
-          w.a = { x: w.a.x + dx, y: w.a.y + dy };
-          w.b = { x: w.b.x + dx, y: w.b.y + dy };
-        } else if (d.board === 'none') {
-          // in schematic mode wires stay attached to pins
-          if (a) w.a = { x: w.a.x + dx, y: w.a.y + dy };
-          if (bb) w.b = { x: w.b.x + dx, y: w.b.y + dy };
-        }
-      }
+      const before = pinsOf(d, moving);
       for (const p of d.parts) {
         if (moving.has(p.id)) {
           p.x += dx;
           p.y += dy;
         }
       }
+      carryWires(d, before);
     });
   },
 
@@ -182,7 +217,17 @@ export const useCircuit = create<CircuitState>((set, get) => ({
     const ids = new Set(get().selection.parts);
     if (!ids.size) return;
     get().apply((d) => {
-      for (const p of d.parts) if (ids.has(p.id)) p.rot = (((p.rot + 1) % 4) as Rot);
+      const before = pinsOf(d, ids);
+      for (const p of d.parts) {
+        if (!ids.has(p.id)) continue;
+        // rotate about the centre of the pins so the part stays where it is (a 180° turn swaps the leads)
+        const c0 = centroid(pinPositions(p));
+        p.rot = ((p.rot + 1) % 4) as Rot;
+        const c1 = centroid(pinPositions(p));
+        p.x += Math.round(c0.x - c1.x);
+        p.y += Math.round(c0.y - c1.y);
+      }
+      carryWires(d, before);
     });
   },
 
@@ -217,11 +262,13 @@ export const useCircuit = create<CircuitState>((set, get) => ({
     set({ selection: { parts: newParts, wires: newWires } });
   },
 
-  setProp(partId, key, value, coalesce) {
-    get().apply((d) => {
+  setProp(partId, key, value, mode) {
+    const fn = (d: CircuitDoc) => {
       const p = d.parts.find((q) => q.id === partId);
       if (p) p.props[key] = value;
-    }, coalesce ? `prop:${partId}:${key}` : undefined);
+    };
+    if (mode === 'live') get().applyLive(fn);
+    else get().apply(fn, mode === 'coalesce' ? `prop:${partId}:${key}` : undefined);
   },
 
   addWire(a, b) {

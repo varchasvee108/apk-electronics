@@ -1,3 +1,4 @@
+import { analyzeTopology } from '@sim/diagnostics';
 import { Simulator, SimulationError } from '@sim/simulator';
 import type { DeviceReading, Diagnostic, ElementSpec, Netlist } from '@sim/types';
 import { extractNetlist, topologyKey, type Extraction } from '@/model/netlist';
@@ -78,6 +79,18 @@ class SimController {
   failures = true;
   trace = new TraceBuffer();
   private probeNodes: Partial<Record<ProbeKind, number>> = {};
+  private owner = 0;
+
+  /** A workbench screen takes ownership of the simulator while it is mounted. */
+  claim(): number {
+    this.owner++;
+    return this.owner;
+  }
+
+  /** Release ownership; powers off only if no newer screen has claimed the simulator since. */
+  release(token: number): void {
+    if (token === this.owner) this.powerOff();
+  }
 
   get running(): boolean {
     const st = useSim.getState().status;
@@ -101,14 +114,15 @@ class SimController {
       const p = doc.probes[k];
       if (p) this.probeNodes[k] = ex.nodeOf.get(ptKey(p));
     }
+    this.ex = ex;
+    useSim.setState({ ex });
     return { ex, netlist: { nodeNames: ex.netlist.nodeNames, elements } };
   }
 
   /** Called on every document change. Re-extracts the netlist and updates a running simulation in place. */
   setDoc(doc: CircuitDoc): void {
     this.doc = doc;
-    const { ex, netlist } = this.build(doc);
-    this.ex = ex;
+    const { netlist } = this.build(doc);
     if (!this.running) {
       this.key = '';
       this.publishStatic();
@@ -164,8 +178,9 @@ class SimController {
 
   powerOn(): void {
     if (!this.doc) return;
-    const { ex, netlist } = this.build(this.doc);
-    this.ex = ex;
+    if (this.raf !== null) cancelAnimationFrame(this.raf);
+    this.raf = null;
+    const { netlist } = this.build(this.doc);
     this.trace.reset();
     this.lastSample = -Infinity;
     try {
@@ -305,13 +320,7 @@ class SimController {
     const ex = this.ex;
     if (!ex) return [];
     const out: Diagnostic[] = ex.errors.map((e) => ({ severity: 'error', code: 'note', title: 'Part error', message: e.message, partId: e.partId }));
-    if (ex.netlist.elements.length) {
-      try {
-        out.push(...new Simulator(ex.netlist).topology);
-      } catch (e) {
-        out.push({ severity: 'error', code: 'note', title: 'Circuit error', message: e instanceof Error ? e.message : String(e) });
-      }
-    }
+    if (ex.netlist.elements.length) out.push(...analyzeTopology(ex.netlist));
     return out;
   }
 
@@ -345,7 +354,8 @@ class SimController {
           live.i = rd.i;
           live.extra = rd.extra ?? {};
         }
-        live.p += Math.max(0, rd.p);
+        // dissipated power for loads; sources report negative power (energy delivered)
+        live.p += rd.p;
         live.load = Math.max(live.load, sim.load.get(e.id) ?? 0);
         if (dev.failed) {
           live.failed = true;

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Diagnostic } from '@sim/types';
+import type { Extraction } from '@/model/netlist';
 import type { DmmMode, Snapshot } from './controller';
 
 export type SimStatus = 'off' | 'running' | 'paused' | 'error';
@@ -15,6 +16,8 @@ interface SimState {
   dmmMode: DmmMode;
   /** Bumped whenever new trace samples may exist. */
   traceVersion: number;
+  /** Netlist extracted from the current document (updated on every edit). */
+  ex: Extraction | null;
 }
 
 export const useSim = create<SimState>(() => ({
@@ -27,4 +30,5 @@ export const useSim = create<SimState>(() => ({
   timeScale: 1,
   dmmMode: 'V',
   traceVersion: 0,
+  ex: null,
 }));

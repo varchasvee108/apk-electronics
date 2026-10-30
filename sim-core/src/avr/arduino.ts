@@ -64,6 +64,8 @@ export class AvrRuntime {
   hexKey: string;
   serial = '';
   flag = false;
+  /** Simulation time at which this program started running (set on the first step after loading). */
+  tBase: number | null = null;
   constructor(hex: string) {
     const flash = parseIntelHex(hex);
     const prog = new Uint16Array(flash.buffer, flash.byteOffset, flash.byteLength / 2);
@@ -133,6 +135,7 @@ export class ArduinoUno extends Device {
     }
     this.drive = new Array(20).fill(PinState.Input);
     this.pending = null;
+    this.inLevels = new Array(20).fill(false);
   }
 
   initTransient(): void {
@@ -176,7 +179,10 @@ export class ArduinoUno extends Device {
     const rt = this.rt;
     if (!rt) return dt;
     if (this.pending) return Math.max(this.pending.at - t, 1e-12);
-    const target = Math.ceil((t + dt) * FREQ);
+    // A program loaded while the circuit runs starts from reset "now", not at t = 0.
+    if (rt.tBase === null) rt.tBase = t;
+    const tBase = rt.tBase;
+    const target = Math.ceil((t + dt - tBase) * FREQ);
     const cpu = rt.cpu;
     const last = this.drive;
     let guard = 0;
@@ -189,7 +195,7 @@ export class ArduinoUno extends Device {
         let same = true;
         for (let k = 0; k < 20; k++) if (snap[k] !== last[k]) same = false;
         if (!same) {
-          this.pending = { at: cpu.cycles / FREQ, drive: snap };
+          this.pending = { at: tBase + cpu.cycles / FREQ, drive: snap };
           return Math.max(this.pending.at - t, 1e-12);
         }
       }

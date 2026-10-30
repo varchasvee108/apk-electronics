@@ -1,7 +1,8 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button, Icon, IconButton } from '@/components/ui';
+import { confirm, notify } from '@/lib/dialog';
 import { exportCircuit, pickCircuitFile } from '@/lib/share';
 import { emptyDoc, newId } from '@/model/types';
 import { deleteCircuit, listCircuits, loadCircuit, renameCircuit, saveCircuit, type CircuitRow } from '@/store/db';
@@ -22,7 +23,7 @@ export default function CircuitsScreen() {
       refresh();
       router.push(`/bench/${doc.id}`);
     } catch (e) {
-      Alert.alert('Import failed', e instanceof Error ? e.message : String(e));
+      notify('Import failed', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -83,26 +84,19 @@ export default function CircuitsScreen() {
               label={`Export ${r.name}`}
               onPress={() => {
                 const doc = loadCircuit(r.id);
-                if (doc) exportCircuit(doc).catch((e) => Alert.alert('Export failed', String(e)));
+                if (doc) exportCircuit(doc).catch((e) => notify('Export failed', e instanceof Error ? e.message : String(e)));
               }}
             />
             <IconButton
               icon="trash-outline"
               label={`Delete ${r.name}`}
               color={C.danger}
-              onPress={() =>
-                Alert.alert(`Delete “${r.name}”?`, 'This cannot be undone.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => {
-                      deleteCircuit(r.id);
-                      refresh();
-                    },
-                  },
-                ])
-              }
+              onPress={async () => {
+                if (await confirm(`Delete “${r.name}”?`, 'This cannot be undone.', 'Delete', true)) {
+                  deleteCircuit(r.id);
+                  refresh();
+                }
+              }}
             />
           </View>
         ))}

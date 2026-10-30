@@ -14,7 +14,19 @@ export interface Extraction {
   elementsByPart: Map<string, ElementSpec[]>;
   /** Grid points belonging to each node (for highlighting a net). */
   netPoints: Pt[][];
+  /** Breadboard connectivity groups (strips / rail halves) that belong to a node. */
+  groupNode: Map<string, number>;
+  board: CircuitDoc['board'];
   errors: { partId: string; message: string }[];
+}
+
+/** Node at any grid point, including breadboard holes nothing is plugged into (same strip = same node). */
+export function nodeAt(ex: Extraction, p: Pt): number | undefined {
+  const direct = ex.nodeOf.get(ptKey(p));
+  if (direct !== undefined) return direct;
+  if (ex.board !== 'breadboard') return undefined;
+  const h = holeAt(p);
+  return h ? ex.groupNode.get(h.group) : undefined;
 }
 
 class UnionFind {
@@ -84,6 +96,7 @@ export function extractNetlist(doc: CircuitDoc): Extraction {
   const names: string[] = ['GND'];
   const netPoints: Pt[][] = [[]];
   const nodeOf = new Map<string, number>();
+  const groupNode = new Map<string, number>();
   const nameHint = new Map<number, string>();
   for (const [k, p] of points) {
     const r = uf.find(k);
@@ -96,6 +109,10 @@ export function extractNetlist(doc: CircuitDoc): Extraction {
     }
     nodeOf.set(k, idx);
     netPoints[idx].push(p);
+    if (doc.board === 'breadboard') {
+      const g = holeAt(p);
+      if (g) groupNode.set(g.group, idx);
+    }
     if (idx !== 0 && doc.board === 'breadboard') {
       const h = holeAt(p);
       if (h) {
@@ -151,7 +168,7 @@ export function extractNetlist(doc: CircuitDoc): Extraction {
     }
   }
 
-  return { netlist: { nodeNames: names, elements }, nodeOf, partPins, elementsByPart, netPoints, errors };
+  return { netlist: { nodeNames: names, elements }, nodeOf, partPins, elementsByPart, netPoints, groupNode, board: doc.board, errors };
 }
 
 /** Structural fingerprint: identical topology and element types (params may differ). */

@@ -88,15 +88,16 @@ export function analyzeTopology(netlist: Netlist): Diagnostic[] {
   // ---------- ground reference
   const touchesGround = els.some((e) => e.nodes.includes(0));
   if (!touchesGround) {
-    const src = els.find((e) => e.type === 'V' || e.type === 'supply');
+    const src = els.find((e) => e.type === 'V' || e.type === 'supply') ?? els.find((e) => e.type === 'avr');
+    const refNode = src ? (src.type === 'avr' ? src.nodes[22] : src.nodes[1]) : undefined;
     out.push({
       severity: 'warning',
       code: 'no-ground',
       title: 'No ground reference',
       message: src
-        ? `Nothing is connected to ground, so voltages have no reference point. Bench is measuring relative to the − terminal of ${label(src)}. Add a Ground symbol to make this explicit.`
+        ? `Nothing is connected to ground, so voltages have no reference point. Bench is measuring relative to the ${src.type === 'avr' ? 'GND pin' : '− terminal'} of ${label(src)}. Add a Ground symbol to make this explicit.`
         : 'Nothing is connected to ground, so voltages have no reference point. Add a Ground symbol (or connect the − of your supply to the ground rail).',
-      node: src ? src.nodes[1] : undefined,
+      node: refNode,
     });
   }
 

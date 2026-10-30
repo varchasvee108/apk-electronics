@@ -3,8 +3,8 @@ import { formatEng } from '@sim/units';
 import type { Snapshot } from '@/sim/controller';
 import { hole } from './breadboard';
 import type { Check } from './lessons';
-import type { Extraction } from './netlist';
-import { ptKey, type CircuitDoc, type PartInstance } from './types';
+import { nodeAt, type Extraction } from './netlist';
+import type { CircuitDoc, PartInstance } from './types';
 
 export interface CheckMemory {
   blinks: Record<string, { last: boolean; count: number }>;
@@ -94,7 +94,7 @@ export function evaluate(c: Check, ctx: CheckContext): CheckResult {
     }
     case 'voltage': {
       if (!snap || !ex) return need();
-      const n = ex.nodeOf.get(ptKey(hole(c.at)));
+      const n = nodeAt(ex, hole(c.at));
       const v = n === undefined ? 0 : (snap.nodeV[n] ?? 0);
       return { ok: inRange(v, c.min, c.max), detail: formatEng(v, 'V') };
     }

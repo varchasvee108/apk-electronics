@@ -163,12 +163,17 @@ function Scope() {
 
   // Auto-set: fit V/div to each channel, then find the period and show ~2.5 cycles.
   const [autoStage, setAutoStage] = useState<number | null>(0);
-  const autoset = () => setAutoStage(0);
+  const [autoTick, setAutoTick] = useState(0);
+  const autoset = () => {
+    setAutoStage(0);
+    setAutoTick((k) => k + 1);
+  };
   useEffect(() => {
     if (autoStage === null || status !== 'running') return;
     const timer = setTimeout(() => {
       const t = tr.t;
-      if (t.length < 20) return setAutoStage(autoStage);
+      // not enough data yet: look again shortly
+      if (t.length < 20) return setAutoTick((k) => k + 1);
       const nv = [...vdiv];
       let trigK = -1;
       let freq = 0;
@@ -209,7 +214,7 @@ function Scope() {
       } else setAutoStage(null);
     }, 1200);
     return () => clearTimeout(timer);
-  }, [autoStage, status, tdivIdx, vdiv, probes, tr]);
+  }, [autoStage, autoTick, status, tdivIdx, vdiv, probes, tr]);
 
   // trigger: latest crossing that leaves a full screen after it (trigger at 1 division)
   const span = tdiv * 10;

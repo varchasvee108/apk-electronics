@@ -1,13 +1,14 @@
-import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { assemble } from '@sim/avr/assembler';
 import { parseIntelHex } from '@sim/avr/intelhex';
 import { STARTER_PROGRAMS } from '@sim/avr/programs';
 import { BAND_NAMES, BAND_COLORS, formatEng, resistorBands } from '@sim/units';
+import { notify } from '@/lib/dialog';
+import { pickTextFile } from '@/lib/share';
 import { explain } from '@/model/formulas';
+import { nodeAt } from '@/model/netlist';
 import { partDef, partLabel, type PropSpec } from '@/model/parts';
 import { WIRE_COLORS, type PartInstance } from '@/model/types';
 import { controller } from '@/sim/controller';
@@ -15,6 +16,8 @@ import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
 import { C, R, S, T } from '@/theme';
 import { Badge, Button, Card, Chip, KV, SectionTitle, Slider, Toggle, ValueInput } from './ui';
+
+const SOURCE_TYPES = new Set(['battery', 'supply', 'funcgen', 'acsource']);
 
 export function Inspector() {
   const doc = useCircuit((s) => s.doc);
@@ -45,7 +48,9 @@ function EmptyInspector() {
       <SectionTitle>Gestures</SectionTitle>
       <Text style={T.small}>• Drag a part to move it; it snaps into holes.</Text>
       <Text style={T.small}>• Wire tool: drag from hole to hole, or tap one then the other.</Text>
-      <Text style={T.small}>• Pinch to zoom, drag empty space to pan.</Text>
+      <Text style={T.small}>• Select a wire, then drag either end to plug it into another hole.</Text>
+      <Text style={T.small}>• Pinch to zoom; drag empty space (or use two fingers) to pan.</Text>
+      <Text style={T.small}>• Tap any hole to see which holes are connected to it and their voltage.</Text>
       <Text style={T.small}>• While running: tap switches, hold push buttons.</Text>
     </ScrollView>
   );
@@ -69,9 +74,10 @@ function MultiInspector() {
 function WireInspector({ id }: { id: string }) {
   const wire = useCircuit((s) => s.doc.wires.find((w) => w.id === id));
   const snap = useSim((s) => s.snapshot);
+  const ex = useSim((s) => s.ex);
   const st = useCircuit.getState();
   if (!wire) return null;
-  const n = controller.ex?.nodeOf.get(`${wire.a.x},${wire.a.y}`);
+  const n = ex ? nodeAt(ex, wire.a) : undefined;
   return (
     <ScrollView contentContainerStyle={styles.pad}>
       <Text style={T.title}>Wire</Text>
@@ -82,6 +88,7 @@ function WireInspector({ id }: { id: string }) {
           <KV k="Current along wire" v={formatEng(snap.wireI[id] ?? 0, 'A')} />
         </Card>
       )}
+      <Text style={[T.caption, { marginTop: S.sm }]}>Drag either end of the selected wire on the canvas to move it to another hole.</Text>
       <SectionTitle>Colour</SectionTitle>
       <View style={styles.swatches}>
         {WIRE_COLORS.map((c) => (
@@ -138,7 +145,7 @@ function PartInspector({ part }: { part: PartInstance }) {
             <>
               <KV k="Voltage" v={formatEng(live.v, 'V')} />
               <KV k="Current" v={formatEng(live.i, 'A')} />
-              <KV k="Power" v={formatEng(live.p, 'W')} />
+              {SOURCE_TYPES.has(part.type) ? <KV k="Power delivered" v={formatEng(Math.max(0, -live.p), 'W')} /> : <KV k="Power" v={formatEng(live.p, 'W')} />}
               {Object.entries(live.extra)
                 .filter(([k]) => ['mode', 'region', 'rpm', 'out', 'energized', 'brightness'].includes(k))
                 .map(([k, v]) => (
@@ -221,7 +228,8 @@ function Bands({ ohms }: { ohms: number }) {
 function PropEditor({ part, spec }: { part: PartInstance; spec: PropSpec }) {
   const st = useCircuit.getState();
   const v = part.props[spec.key];
-  const set = (val: number | string | boolean, coalesce = false) => st.setProp(part.id, spec.key, val, coalesce);
+  const set = (val: number | string | boolean, coalesce = false) =>
+    st.setProp(part.id, spec.key, val, spec.key === 'pressed' ? 'live' : coalesce ? 'coalesce' : undefined);
   if (spec.kind === 'bool') return <Toggle label={spec.label} value={!!v} onChange={(b) => set(b)} />;
   if (spec.kind === 'enum')
     return (
@@ -307,14 +315,13 @@ function ProgramEditor({ part }: { part: PartInstance }) {
   };
 
   const pick = async () => {
-    const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
-    if (res.canceled) return;
     try {
-      const text = await new File(res.assets[0].uri).text();
-      loadHex(text, res.assets[0].name.replace(/\.hex$/i, ''), '');
-      setInfo(`Loaded ${res.assets[0].name}`);
+      const f = await pickTextFile();
+      if (!f) return;
+      loadHex(f.text, f.name.replace(/\.hex$/i, ''), '');
+      setInfo(`Loaded ${f.name}`);
     } catch (e) {
-      Alert.alert('Could not read file', e instanceof Error ? e.message : String(e));
+      notify('Could not read file', e instanceof Error ? e.message : String(e));
     }
   };
 

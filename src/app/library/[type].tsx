@@ -10,6 +10,16 @@ import { PARTS, partBounds } from '@/model/parts';
 import type { PartInstance } from '@/model/types';
 import { C, S, T } from '@/theme';
 
+// which examples use each part type (built once, on first use)
+let usage: Map<string, typeof EXAMPLES> | null = null;
+function relatedExamples(type: string) {
+  if (!usage) {
+    usage = new Map();
+    for (const e of EXAMPLES) for (const t of new Set(e.build().parts.map((p) => p.type))) usage.set(t, [...(usage.get(t) ?? []), e]);
+  }
+  return (usage.get(type) ?? []).slice(0, 4);
+}
+
 export default function DatasheetScreen() {
   const { type } = useLocalSearchParams<{ type: string }>();
   const def = type ? PARTS[type] : undefined;
@@ -23,7 +33,7 @@ export default function DatasheetScreen() {
   const ph = b.y1 - b.y0 + 3;
   const cw = Math.min(width - S.lg * 2, 520);
   const scale = Math.min(cw / pw, 220 / ph);
-  const related = EXAMPLES.filter((e) => e.build().parts.some((p) => p.type === def.type)).slice(0, 4);
+  const related = relatedExamples(def.type);
   return (
     <ScrollView contentContainerStyle={styles.page}>
       <Stack.Screen options={{ title: def.name }} />

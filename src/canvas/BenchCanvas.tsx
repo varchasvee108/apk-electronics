@@ -13,7 +13,8 @@ import {
 import { useDerivedValue, useFrameCallback, useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { formatEng } from '@sim/units';
-import { holeAt } from '@/model/breadboard';
+import { allHoles, holeAt } from '@/model/breadboard';
+import { nodeAt } from '@/model/netlist';
 import { partBounds, partLabel, pinPositions } from '@/model/parts';
 import { ptKey, type Pt } from '@/model/types';
 import { controller } from '@/sim/controller';
@@ -69,7 +70,10 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const sc = useSharedValue(U);
   const clock = useSharedValue(0);
   const drag = { ids: useSharedValue<string[]>([]), dx: useSharedValue(0), dy: useSharedValue(0) };
-  const mode = useSharedValue<'pan' | 'part' | 'wire' | 'marquee' | 'press' | 'none'>('none');
+  const mode = useSharedValue<'pan' | 'part' | 'wire' | 'wireEnd' | 'marquee' | 'press' | 'none'>('none');
+  const wireEnds = useSharedValue<{ id: string; ax: number; ay: number; bx: number; by: number; sel: boolean }[]>([]);
+  const grabbed = useSharedValue({ id: '', end: 'a' as 'a' | 'b' });
+  const lastFocal = useSharedValue({ x: 0, y: 0 });
   const pStart = useSharedValue({ x: 0, y: 0 });
   const pEnd = useSharedValue({ x: 0, y: 0 });
   const boxes = useSharedValue<Box[]>([]);
@@ -91,6 +95,10 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     selIds.set(selection.parts);
   }, [selection.parts, selIds]);
   useEffect(() => {
+    const hidden = sch && doc.board === 'breadboard';
+    wireEnds.set(hidden ? [] : doc.wires.map((w) => ({ id: w.id, ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y, sel: selection.wires.includes(w.id) })));
+  }, [doc.wires, doc.board, sch, selection.wires, wireEnds]);
+  useEffect(() => {
     toolSv.set(tool);
     if (tool !== 'wire') pendingWire.current = null;
   }, [tool, toolSv]);
@@ -98,7 +106,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     runningSv.set(powered);
   }, [powered, runningSv]);
 
-  const ex = controller.ex;
+  const ex = useSim((s) => s.ex);
   const segments = useMemo(() => (sch && doc.board === 'breadboard' && ex ? netSegments(doc, ex.partPins) : []), [sch, doc, ex]);
 
   // ---------------------------------------------------------------- camera helpers
@@ -156,12 +164,16 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   );
 
   const press = useCallback((id: string, down: boolean) => {
-    useCircuit.getState().setProp(id, 'pressed', down, true);
+    useCircuit.getState().setProp(id, 'pressed', down, 'live');
   }, []);
 
   const onWire = useCallback((ax: number, ay: number, bx: number, by: number) => {
     if (ax === bx && ay === by) return;
     useCircuit.getState().addWire({ x: ax, y: ay }, { x: bx, y: by });
+  }, []);
+
+  const onWireEnd = useCallback((id: string, end: 'a' | 'b', x: number, y: number) => {
+    useCircuit.getState().moveWireEnd(id, end, { x, y });
   }, []);
 
   const onMarquee = useCallback((x0: number, y0: number, x1: number, y1: number) => {
@@ -209,14 +221,16 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         st.select({ parts: [part.id] }, st.tool === 'multi');
         return;
       }
-      const wire = hitWire(st.doc, w);
+      const cur = useSim.getState().ex;
+      // jumper wires are not drawn in the schematic of a breadboard circuit, so they can't be tapped there
+      const wiresVisible = st.view !== 'schematic' || st.doc.board === 'none';
+      const wire = wiresVisible ? hitWire(st.doc, w) : null;
       if (wire) {
         st.select({ wires: [wire.id] }, st.tool === 'multi');
-        const n = controller.ex?.nodeOf.get(ptKey(wire.a));
-        st.setFocusNet(n ?? null);
+        st.setFocusNet(cur ? (nodeAt(cur, wire.a) ?? null) : null);
         return;
       }
-      const n = controller.ex?.nodeOf.get(ptKey(g));
+      const n = cur ? nodeAt(cur, g) : undefined;
       const hole = st.doc.board === 'breadboard' ? holeAt(g) : null;
       if (n !== undefined || hole) {
         st.clearSelection();
@@ -237,7 +251,8 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         st.togglePin(part.id);
         return;
       }
-      const n = controller.ex?.nodeOf.get(ptKey(snap(w)));
+      const cur = useSim.getState().ex;
+      const n = cur ? nodeAt(cur, snap(w)) : undefined;
       if (n !== undefined) st.togglePin(`net:${n}`);
     },
     [toWorld],
@@ -259,6 +274,24 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         return;
       }
       if (t === 'select' || t === 'multi') {
+        const ends = wireEnds.get();
+        const grab = (onlySelected: boolean, tol: number): boolean => {
+          for (let i = ends.length - 1; i >= 0; i--) {
+            const we = ends[i];
+            if (onlySelected && !we.sel) continue;
+            const da = Math.hypot(w.x - we.ax, w.y - we.ay);
+            const db = Math.hypot(w.x - we.bx, w.y - we.by);
+            if (Math.min(da, db) > tol) continue;
+            const endA = da <= db;
+            mode.set('wireEnd');
+            grabbed.set({ id: we.id, end: endA ? 'a' : 'b' });
+            pStart.set(endA ? { x: we.bx, y: we.by } : { x: we.ax, y: we.ay });
+            pEnd.set(endA ? { x: we.ax, y: we.ay } : { x: we.bx, y: we.by });
+            return true;
+          }
+          return false;
+        };
+        if (t === 'select' && grab(true, 0.6)) return;
         const bs = boxes.get();
         for (let i = bs.length - 1; i >= 0; i--) {
           const b = bs[i];
@@ -277,6 +310,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
             return;
           }
         }
+        if (t === 'select' && grab(false, 0.4)) return;
         if (t === 'multi') {
           mode.set('marquee');
           pStart.set(w);
@@ -293,7 +327,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
       } else if (m === 'part') {
         drag.dx.set(e.translationX / sc.get());
         drag.dy.set(e.translationY / sc.get());
-      } else if (m === 'wire') {
+      } else if (m === 'wire' || m === 'wireEnd') {
         pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
       } else if (m === 'marquee') {
         pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
@@ -314,6 +348,9 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         if (b) scheduleOnRN(press, b.id, false);
       } else if (m === 'wire' && !e.canceled) {
         scheduleOnRN(onWire, pStart.get().x, pStart.get().y, Math.round(pEnd.get().x), Math.round(pEnd.get().y));
+      } else if (m === 'wireEnd' && !e.canceled) {
+        const g = grabbed.get();
+        scheduleOnRN(onWireEnd, g.id, g.end, Math.round(pEnd.get().x), Math.round(pEnd.get().y));
       } else if (m === 'marquee' && !e.canceled) {
         scheduleOnRN(onMarquee, pStart.get().x, pStart.get().y, pEnd.get().x, pEnd.get().y);
       }
@@ -321,8 +358,17 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   });
 
   const pinch = usePinchGesture({
+    onActivate: (e) => {
+      'worklet';
+      lastFocal.set({ x: e.focalX, y: e.focalY });
+    },
     onUpdate: (e) => {
       'worklet';
+      // two fingers also pan (works in every tool, including wire drawing)
+      const lf = lastFocal.get();
+      tx.set(tx.get() + e.focalX - lf.x);
+      ty.set(ty.get() + e.focalY - lf.y);
+      lastFocal.set({ x: e.focalX, y: e.focalY });
       const ns = Math.max(4, Math.min(140, sc.get() * e.scaleChange));
       const k = ns / sc.get();
       tx.set(e.focalX - (e.focalX - tx.get()) * k);
@@ -345,7 +391,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
 
   // ---------------------------------------------------------------- derived drawing values
   const camera = useDerivedValue(() => [{ translateX: tx.get() }, { translateY: ty.get() }, { scale: sc.get() }]);
-  const wireOn = useDerivedValue(() => (mode.get() === 'wire' ? 1 : 0));
+  const wireOn = useDerivedValue(() => (mode.get() === 'wire' || mode.get() === 'wireEnd' ? 1 : 0));
   const wP1 = useDerivedValue(() => vec(pStart.get().x, pStart.get().y));
   const wP2 = useDerivedValue(() => vec(Math.round(pEnd.get().x), Math.round(pEnd.get().y)));
   const marqueeOn = useDerivedValue(() => (mode.get() === 'marquee' ? 1 : 0));
@@ -363,7 +409,16 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     return n === undefined ? null : (snapshot.nodeV[n] ?? 0);
   };
 
-  const focusPts = focusNet !== null && ex ? (ex.netPoints[focusNet] ?? []) : [];
+  const focusPts = useMemo(() => {
+    if (focusNet === null || !ex) return [];
+    const pts = [...(ex.netPoints[focusNet] ?? [])];
+    if (ex.board === 'breadboard') {
+      // every hole of the strips / rails this net uses
+      const groups = new Set([...ex.groupNode].filter(([, n]) => n === focusNet).map(([g]) => g));
+      if (groups.size) for (const h of allHoles()) if (groups.has(holeAt(h)?.group ?? '')) pts.push(h);
+    }
+    return pts;
+  }, [focusNet, ex]);
 
   return (
     <View style={styles.fill} onLayout={onLayout}>
@@ -423,8 +478,12 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
               <Group opacity={marqueeOn}>
                 <Rect x={mx} y={my} width={mw} height={mh} color={alpha(C.accent, 0.12)} />
               </Group>
-              {snapshot && focusNet !== null && focusPts[0] && (
-                <Bubble x={focusPts[0].x + 0.6} y={focusPts[0].y - 0.8} lines={[`${controller.nodeName(focusNet)}`, formatEng(snapshot.nodeV[focusNet] ?? 0, 'V')]} />
+              {focusNet !== null && focusPts[0] && (
+                <Bubble
+                  x={focusPts[0].x + 0.6}
+                  y={focusPts[0].y - 0.8}
+                  lines={[controller.nodeName(focusNet), snapshot ? formatEng(snapshot.nodeV[focusNet] ?? 0, 'V') : 'power on to measure']}
+                />
               )}
               {snapshot &&
                 pinned.map((id) => {

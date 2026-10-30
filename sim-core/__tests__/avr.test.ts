@@ -100,4 +100,37 @@ describe('Arduino Uno co-simulation (avr8js)', () => {
     const avr = sim.device('U1') as unknown as { rt: { serial: string } };
     expect(avr.rt.serial).toContain('Hello from Bench!');
   });
+
+  test('loading a program while running restarts it from that moment', () => {
+    const sim = uno(program('blink'), (b) => b.R('R1', 'D13', '0', 1e3));
+    sim.maxStep = 1e-3;
+    sim.startTransient();
+    sim.advance(1.2);
+    const t0 = sim.t;
+    // reload a different program, then the original again: neither may "catch up" from t = 0
+    const dev = sim.device('U1')!;
+    dev.setParam('hex', program('button'));
+    sim.markDiscontinuity();
+    sim.advance(t0 + 0.05);
+    dev.setParam('hex', program('blink'));
+    sim.markDiscontinuity();
+    const start = sim.t;
+    const w: { t: number[]; v: number[] } = { t: [], v: [] };
+    sim.advance(start + 1.2, { onStep: (s) => (w.t.push(s.t), w.v.push(s.v('D13'))) });
+    const edges = risingCrossings(w.t, w.v, 2.5);
+    expect(edges.length).toBeGreaterThanOrEqual(1);
+    expect(Math.abs(edges[0] - (start + 0.5))).toBeLessThan(5e-3);
+  });
+
+  test('a board with no ground symbol is referenced to its GND pin', () => {
+    const b = new NetlistBuilder();
+    b.add('avr', 'U1', UNO_PINS.map((p) => (p === 'GND' ? 'gnd_pin' : p)), { hex: program('blink') });
+    b.R('R1', 'D13', 'gnd_pin', 1e3);
+    const sim = new Simulator(b.build());
+    expect(sim.topology.find((d) => d.code === 'no-ground')?.message).toContain('GND pin');
+    sim.maxStep = 1e-3;
+    sim.startTransient();
+    sim.advance(0.7);
+    expect(sim.v('D13') - sim.v('gnd_pin')).toBeGreaterThan(4.5);
+  });
 });

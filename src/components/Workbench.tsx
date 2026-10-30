@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Diagnostic } from '@sim/types';
 import { formatEng } from '@sim/units';
@@ -9,6 +9,7 @@ import { evaluate, newMemory, remember, type CheckMemory, type CheckResult } fro
 import { LESSONS, type Lesson } from '@/model/lessons';
 import { partDef, partLabel } from '@/model/parts';
 import { WIRE_COLORS, newId, type CircuitDoc } from '@/model/types';
+import { confirm, notify } from '@/lib/dialog';
 import { exportCircuit, shareScreenshot } from '@/lib/share';
 import { controller } from '@/sim/controller';
 import { useSim } from '@/sim/store';
@@ -49,30 +50,39 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   const [diagOpen, setDiagOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [speedOpen, setSpeedOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const api = useRef<CanvasApi | null>(null);
 
-  // load the document once
+  // load the document once; this screen owns the simulator while mounted
+  const loaded = doc.id === initialDoc.id;
+  const latest = useRef({ doc: initialDoc, dirty: false });
   useEffect(() => {
-    useCircuit.getState().load(initialDoc);
+    const token = controller.claim();
     controller.powerOff();
+    useCircuit.getState().load(initialDoc);
     controller.setDoc(useCircuit.getState().doc);
     const t = autoPower ? setTimeout(() => controller.powerOn(), 300) : undefined;
     return () => {
       if (t) clearTimeout(t);
-      controller.powerOff();
-      const st = useCircuit.getState();
-      if (persist && st.dirty) saveCircuit(st.doc);
+      controller.release(token);
+      // save edits made after the last autosave (the store may already hold the next screen's circuit)
+      if (persist && latest.current.dirty) saveCircuit(latest.current.doc);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDoc.id]);
 
   // live netlist + autosave
   useEffect(() => {
+    if (!loaded) return;
+    latest.current = { doc, dirty };
     controller.setDoc(doc);
     if (!persist || !dirty) return;
-    const t = setTimeout(() => useCircuit.getState().markSaved(), 800);
+    const t = setTimeout(() => {
+      useCircuit.getState().markSaved();
+      latest.current = { doc, dirty: false };
+    }, 800);
     return () => clearTimeout(t);
-  }, [doc, dirty, persist]);
+  }, [doc, dirty, persist, loaded]);
 
   // jump to the inspector when something new is selected
   const [lastSel, setLastSel] = useState(selection);
@@ -89,18 +99,26 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   const panel = (
     <View style={{ flex: 1 }}>
       <View style={styles.tabs}>
-        <Segmented<PanelTab>
-          options={[
-            ...(!wide ? [{ value: 'parts' as const, label: 'Parts' }] : []),
-            { value: 'inspect', label: 'Inspect' },
-            { value: 'instruments', label: 'Instruments' },
-            ...(lesson ? [{ value: 'lesson' as const, label: lesson.challenge ? 'Challenge' : 'Lesson' }] : []),
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+          <Segmented<PanelTab>
+            options={[
+              ...(!wide ? [{ value: 'parts' as const, label: 'Parts' }] : []),
+              { value: 'inspect', label: 'Inspect' },
+              { value: 'instruments', label: 'Instruments' },
+              ...(lesson ? [{ value: 'lesson' as const, label: lesson.challenge ? 'Challenge' : 'Lesson' }] : []),
+            ]}
+            value={tab}
+            onChange={(t) => {
+              setTab(t);
+              setCollapsed(false);
+            }}
+          />
+        </ScrollView>
+        {!wide && (
+          <IconButton icon={collapsed ? 'chevron-up' : 'chevron-down'} label={collapsed ? 'Expand panel' : 'Collapse panel'} onPress={() => setCollapsed(!collapsed)} />
+        )}
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, display: collapsed && !wide ? 'none' : 'flex' }}>
         {tab === 'parts' && <PartsTray center={center} onAdded={() => setTab('inspect')} />}
         {tab === 'inspect' && <Inspector />}
         {tab === 'instruments' && <Instruments tab={instTab} setTab={setInstTab} />}
@@ -108,6 +126,8 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
       </View>
     </View>
   );
+
+  if (!loaded) return <View style={[styles.root, { paddingTop: insets.top }]} />;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -131,7 +151,7 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
             fit={() => api.current?.fit()}
           />
         </View>
-        <View style={wide ? styles.right : [styles.bottom, { height: Math.max(260, height * 0.42) }]}>{panel}</View>
+        <View style={wide ? styles.right : [styles.bottom, { height: collapsed ? 66 : Math.max(260, height * 0.42) }]}>{panel}</View>
       </View>
       <StatusBar onDiagnostics={() => setDiagOpen(true)} bottomInset={insets.bottom} wide={wide} />
       <DiagnosticsSheet open={diagOpen} onClose={() => setDiagOpen(false)} />
@@ -364,7 +384,7 @@ function MoreMenu({ open, onClose, persist, snapshot }: { open: boolean; onClose
     try {
       await fn();
     } catch (e) {
-      Alert.alert('Something went wrong', e instanceof Error ? e.message : String(e));
+      notify('Something went wrong', e instanceof Error ? e.message : String(e));
     }
   };
   return (
@@ -421,21 +441,14 @@ function MoreMenu({ open, onClose, persist, snapshot }: { open: boolean; onClose
           icon="trash-outline"
           label="Clear the circuit"
           danger
-          onPress={act(() =>
-            Alert.alert('Clear the circuit?', 'All parts and wires will be removed (you can undo).', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Clear',
-                style: 'destructive',
-                onPress: () =>
-                  st.apply((d) => {
-                    d.parts = [];
-                    d.wires = [];
-                    d.probes = {};
-                  }),
-              },
-            ]),
-          )}
+          onPress={act(async () => {
+            if (await confirm('Clear the circuit?', 'All parts and wires will be removed (you can undo).', 'Clear', true))
+              st.apply((d) => {
+                d.parts = [];
+                d.wires = [];
+                d.probes = {};
+              });
+          })}
         />
       </View>
     </Modal>
@@ -484,7 +497,7 @@ function SpeedMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
 function NetlistView() {
   const doc = useCircuit((s) => s.doc);
   const snap = useSim((s) => s.snapshot);
-  const ex = controller.ex;
+  const ex = useSim((s) => s.ex);
   const lines = useMemo(() => {
     if (!ex) return [];
     const nm = (n: number) => ex.netlist.nodeNames[n] ?? `N${n}`;
@@ -529,6 +542,7 @@ function NetlistView() {
 function LessonPanel({ lesson }: { lesson: Lesson }) {
   const doc = useCircuit((s) => s.doc);
   const snap = useSim((s) => s.snapshot);
+  const ex = useSim((s) => s.ex);
   const [hints, setHints] = useState(0);
   const [done, setDone] = useState(false);
   const mem = useRef<CheckMemory>(newMemory());
@@ -539,7 +553,7 @@ function LessonPanel({ lesson }: { lesson: Lesson }) {
     setProgress(lesson.id, 'started');
   }, [lesson.id]);
   useEffect(() => {
-    const ctx = { doc, snap, ex: controller.ex, mem: mem.current, trace: controller.trace, serial: (id: string) => controller.serialText(id) };
+    const ctx = { doc, snap, ex, mem: mem.current, trace: controller.trace, serial: (id: string) => controller.serialText(id) };
     remember(lesson.checks, ctx);
     const r = lesson.checks.map((c) => evaluate(c, ctx));
     setResults(r);
@@ -547,7 +561,7 @@ function LessonPanel({ lesson }: { lesson: Lesson }) {
       setDone(true);
       setProgress(lesson.id, 'done');
     }
-  }, [doc, snap, lesson, done]);
+  }, [doc, snap, ex, lesson, done]);
   const idx = LESSONS.findIndex((l) => l.id === lesson.id);
   const next = idx >= 0 ? LESSONS[idx + 1] : undefined;
   return (
@@ -608,7 +622,7 @@ const styles = StyleSheet.create({
   canvasWrap: { flex: 1, overflow: 'hidden' },
   right: { width: 380, backgroundColor: C.surface, borderLeftWidth: 1, borderLeftColor: C.border },
   bottom: { backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border },
-  tabs: { padding: S.sm, borderBottomWidth: 1, borderBottomColor: C.border },
+  tabs: { flexDirection: 'row', alignItems: 'center', padding: S.sm, borderBottomWidth: 1, borderBottomColor: C.border },
   strip: {
     position: 'absolute',
     flexDirection: 'row',

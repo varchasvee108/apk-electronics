@@ -1,7 +1,8 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, Button, Icon } from '@/components/ui';
+import { confirm } from '@/lib/dialog';
 import { LESSONS, UNITS } from '@/model/lessons';
 import { getProgress, resetProgress, type LessonStatus } from '@/store/db';
 import { C, R, S, T } from '@/theme';
@@ -52,19 +53,12 @@ export default function LearnScreen() {
         icon="refresh"
         label="Reset progress"
         kind="ghost"
-        onPress={() =>
-          Alert.alert('Reset all lesson progress?', '', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Reset',
-              style: 'destructive',
-              onPress: () => {
-                resetProgress();
-                setProgressState({});
-              },
-            },
-          ])
-        }
+        onPress={async () => {
+          if (await confirm('Reset all lesson progress?', 'Your circuits are not affected.', 'Reset', true)) {
+            resetProgress();
+            setProgressState({});
+          }
+        }}
       />
     </ScrollView>
   );
