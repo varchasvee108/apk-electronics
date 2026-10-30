@@ -141,11 +141,13 @@ export class OpAmp extends Device {
     const vd = this.pv(x, 0) - this.pv(x, 1);
     const saturated = vout > vcc - this.hHi - 0.05 || vout < vee + this.hLo + 0.05;
     const iin = vd / this.rin;
+    const iq = ((vcc - vee) * this.num('iq', 1e-3)) / 10;
     return {
       v: vout,
       i: iout,
       p: iout > 0 ? (vcc - vout) * iout : (vout - vee) * -iout,
-      pinI: [iin, -iin, 0, 0, -iout],
+      // output current is drawn from the rail it flows towards (the solver references it to ground)
+      pinI: [iin, -iin, Math.max(iout, 0) + iq, Math.min(iout, 0) - iq, -iout],
       extra: { vd, saturated },
     };
   }

@@ -229,11 +229,35 @@ export class ArduinoUno extends Device {
 
   read(x: Float64Array): DeviceReading {
     const i5 = -x[this.br0];
+    // per-pin currents into the board (for wire current animation and readouts)
+    const pinI = new Array(UNO_PINS.length).fill(0);
+    const v5 = this.pv(x, PIN_5V);
+    const vg = this.pv(x, PIN_GND);
+    let into5 = x[this.br0];
+    let intoG = -x[this.br0] - x[this.br0 + 1];
+    for (let k = 0; k < 20; k++) {
+      const vp = this.pv(x, k);
+      const d = this.drive[k];
+      if (d === PinState.High) {
+        pinI[k] = (vp - v5) / 25;
+        into5 -= pinI[k];
+      } else if (d === PinState.Low) {
+        pinI[k] = (vp - vg) / 25;
+        intoG -= pinI[k];
+      } else if (d === PinState.InputPullUp) {
+        pinI[k] = (vp - v5) / 35000;
+        into5 -= pinI[k];
+      }
+    }
+    pinI[PIN_5V] = into5;
+    pinI[PIN_3V3] = x[this.br0 + 1];
+    pinI[PIN_GND] = intoG;
     const pins: string[] = this.drive.map((d) => (d === PinState.High ? 'H' : d === PinState.Low ? 'L' : d === PinState.InputPullUp ? 'P' : 'I'));
     return {
-      v: this.pv(x, PIN_5V) - this.pv(x, PIN_GND),
+      v: v5 - vg,
       i: i5,
       p: 0,
+      pinI,
       extra: {
         running: !!this.rt,
         error: this.loadError,
