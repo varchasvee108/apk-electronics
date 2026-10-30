@@ -1,10 +1,16 @@
+import { useTypeface } from '@shopify/react-native-skia';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { setTypefaces } from '@/canvas/draw';
 import { C } from '@/theme';
 
 export default function RootLayout() {
+  const regular = useTypeface(require('@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf'));
+  const bold = useTypeface(require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'));
+  if (!regular || !bold) return null;
+  setTypefaces(regular, bold);
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: C.bg }}>
       <SafeAreaProvider>

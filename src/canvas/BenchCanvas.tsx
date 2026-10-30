@@ -63,7 +63,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const snapshot = powered ? snap0 : null;
   const sch = view === 'schematic';
 
-  const [size, setSize] = useState({ w: 800, h: 600 });
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const tx = useSharedValue(40);
   const ty = useSharedValue(40);
   const sc = useSharedValue(U);
@@ -103,20 +103,27 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
 
   // ---------------------------------------------------------------- camera helpers
   const fit = useCallback(() => {
-    const b = docBounds(doc);
-    const s = Math.max(4, Math.min(90, Math.min(size.w / (b.x1 - b.x0), size.h / (b.y1 - b.y0))));
+    const b = docBounds(doc, !sch);
+    // leave room for the floating tool strips at the top
+    const top = 72;
+    const pad = 12;
+    const w = size.w - pad * 2;
+    const h = size.h - top - pad;
+    const s = Math.max(4, Math.min(90, Math.min(w / (b.x1 - b.x0), h / (b.y1 - b.y0))));
     sc.set(s);
-    tx.set((size.w - (b.x1 - b.x0) * s) / 2 - b.x0 * s);
-    ty.set((size.h - (b.y1 - b.y0) * s) / 2 - b.y0 * s);
-  }, [doc, size, sc, tx, ty]);
+    tx.set(pad + (w - (b.x1 - b.x0) * s) / 2 - b.x0 * s);
+    ty.set(top + (h - (b.y1 - b.y0) * s) / 2 - b.y0 * s);
+  }, [doc, size, sc, tx, ty, sch]);
 
+  // frame the circuit when a document opens or the view changes
   const fittedFor = useRef('');
   useEffect(() => {
-    if (fittedFor.current !== doc.id && size.w > 100) {
-      fittedFor.current = doc.id;
+    const key = `${doc.id}:${sch}`;
+    if (fittedFor.current !== key && size.w > 100) {
+      fittedFor.current = key;
       fit();
     }
-  }, [doc.id, size, fit]);
+  }, [doc.id, sch, size, fit]);
 
   const toWorld = useCallback((x: number, y: number): Pt => ({ x: (x - tx.get()) / sc.get(), y: (y - ty.get()) / sc.get() }), [tx, ty, sc]);
 

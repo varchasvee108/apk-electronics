@@ -33,7 +33,7 @@ const SPEEDS: { value: number; label: string }[] = [
   { value: 1e-6, label: '1 µs per second' },
 ];
 
-export function Workbench({ initialDoc, persist, lesson }: { initialDoc: CircuitDoc; persist: boolean; lesson?: Lesson }) {
+export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialDoc: CircuitDoc; persist: boolean; lesson?: Lesson; autoPower?: boolean }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const wide = width >= 760 && width > height * 1.05;
@@ -56,7 +56,9 @@ export function Workbench({ initialDoc, persist, lesson }: { initialDoc: Circuit
     useCircuit.getState().load(initialDoc);
     controller.powerOff();
     controller.setDoc(useCircuit.getState().doc);
+    const t = autoPower ? setTimeout(() => controller.powerOn(), 300) : undefined;
     return () => {
+      if (t) clearTimeout(t);
       controller.powerOff();
       const st = useCircuit.getState();
       if (persist && st.dirty) saveCircuit(st.doc);
@@ -131,7 +133,7 @@ export function Workbench({ initialDoc, persist, lesson }: { initialDoc: Circuit
         </View>
         <View style={wide ? styles.right : [styles.bottom, { height: Math.max(260, height * 0.42) }]}>{panel}</View>
       </View>
-      <StatusBar onDiagnostics={() => setDiagOpen(true)} bottomInset={insets.bottom} />
+      <StatusBar onDiagnostics={() => setDiagOpen(true)} bottomInset={insets.bottom} wide={wide} />
       <DiagnosticsSheet open={diagOpen} onClose={() => setDiagOpen(false)} />
       <MoreMenu open={menuOpen} onClose={() => setMenuOpen(false)} persist={persist} snapshot={() => api.current?.snapshot() ?? null} />
       <SpeedMenu open={speedOpen} onClose={() => setSpeedOpen(false)} />
@@ -196,8 +198,8 @@ function TopBar({ persist, onMenu, onSpeed, wide }: { persist: boolean; onMenu: 
         />
       )}
       <View style={{ flex: 1 }} />
-      <IconButton icon="arrow-undo" label="Undo" disabled={!canUndo} onPress={st.undo} />
-      <IconButton icon="arrow-redo" label="Redo" disabled={!canRedo} onPress={st.redo} />
+      {wide && <IconButton icon="arrow-undo" label="Undo" disabled={!canUndo} onPress={st.undo} />}
+      {wide && <IconButton icon="arrow-redo" label="Redo" disabled={!canRedo} onPress={st.redo} />}
       {on && (
         <>
           <IconButton
@@ -210,7 +212,7 @@ function TopBar({ persist, onMenu, onSpeed, wide }: { persist: boolean; onMenu: 
       )}
       <Pressable accessibilityRole="button" accessibilityLabel="Simulation speed" onPress={onSpeed} style={styles.speedBtn}>
         <Icon name="speedometer-outline" size={18} color={C.ink2} />
-        <Text style={styles.speedText}>{timeScale >= 0.01 ? `${timeScale}×` : `${formatEng(timeScale, 's')}/s`}</Text>
+        {wide && <Text style={styles.speedText}>{timeScale >= 0.01 ? `${timeScale}×` : `${formatEng(timeScale, 's')}/s`}</Text>}
       </Pressable>
       <Button
         icon="power"
@@ -240,6 +242,7 @@ function ToolStrip(props: {
   const view = useCircuit((s) => s.view);
   const board = useCircuit((s) => s.doc.board);
   const wireColor = useCircuit((s) => s.wireColor);
+  const canUndo = useCircuit((s) => s.past.length > 0);
   const st = useCircuit.getState();
   if (view === 'netlist') return null;
   return (
@@ -252,9 +255,10 @@ function ToolStrip(props: {
         {!props.wide && (
           <IconButton icon="swap-horizontal" label="Toggle breadboard / schematic" onPress={() => st.setView(view === 'schematic' && board === 'breadboard' ? 'breadboard' : 'schematic')} />
         )}
+        {!props.wide && <IconButton icon="arrow-undo" label="Undo" disabled={!canUndo} onPress={st.undo} />}
       </View>
       {tool === 'wire' && (
-        <View style={[styles.strip, styles.colors, { left: S.sm, top: S.sm + 64 }]}>
+        <View style={[styles.strip, styles.colors, { left: S.sm, top: S.sm + 64, flexWrap: 'wrap', maxWidth: props.wide ? undefined : 200 }]}>
           {WIRE_COLORS.map((c) => (
             <Pressable
               key={c.value}
@@ -266,7 +270,7 @@ function ToolStrip(props: {
           ))}
         </View>
       )}
-      <View style={[styles.strip, { right: S.sm, top: S.sm }]}>
+      <View style={[styles.strip, { right: S.sm, top: props.wide ? S.sm : S.sm + 64 }]}>
         <IconButton icon="contract-outline" label="Fit to view" onPress={props.fit} />
         <IconButton icon="color-palette-outline" label="Colour wires by voltage" active={props.showVoltage} onPress={() => props.setShowVoltage(!props.showVoltage)} />
         <IconButton icon="flash-outline" label="Animate current flow" active={props.showFlow} onPress={() => props.setShowFlow(!props.showFlow)} />
@@ -277,7 +281,7 @@ function ToolStrip(props: {
 
 // ------------------------------------------------------------------ status bar & diagnostics
 
-function StatusBar({ onDiagnostics, bottomInset }: { onDiagnostics: () => void; bottomInset: number }) {
+function StatusBar({ onDiagnostics, bottomInset, wide }: { onDiagnostics: () => void; bottomInset: number; wide: boolean }) {
   const status = useSim((s) => s.status);
   const simTime = useSim((s) => s.simTime);
   const speed = useSim((s) => s.speed);
@@ -291,8 +295,9 @@ function StatusBar({ onDiagnostics, bottomInset }: { onDiagnostics: () => void; 
       <View style={[styles.dot, { backgroundColor: status === 'running' ? C.power : status === 'paused' ? C.warn : status === 'error' ? C.danger : C.borderStrong }]} />
       <Text style={T.small}>{status === 'off' ? 'Power off' : status === 'error' ? 'Stopped: error' : status === 'paused' ? 'Paused' : 'Running'}</Text>
       {status !== 'off' && (
-        <Text style={[T.caption, { marginLeft: S.sm }]}>
-          t = {formatEng(simTime, 's')} · speed {speed >= timeScale * 0.9 ? 'on target' : `${formatEng(speed, 's')}/s (CPU-limited)`}
+        <Text style={[T.caption, { marginLeft: S.sm, flexShrink: 1 }]} numberOfLines={1}>
+          t = {formatEng(simTime, 's')}
+          {wide ? ` · speed ${speed >= timeScale * 0.9 ? 'on target' : `${formatEng(speed, 's')}/s (CPU-limited)`}` : ''}
         </Text>
       )}
       <View style={{ flex: 1 }} />
@@ -303,7 +308,7 @@ function StatusBar({ onDiagnostics, bottomInset }: { onDiagnostics: () => void; 
       </Pressable>
       <Pressable accessibilityRole="link" accessibilityLabel="About model accuracy" onPress={() => router.push('/about')} style={styles.noteBtn}>
         <Icon name="information-circle-outline" size={16} color={C.ink3} />
-        <Text style={T.caption}>Model approximations</Text>
+        {wide && <Text style={T.caption}>Model approximations</Text>}
       </Pressable>
     </View>
   );
@@ -593,7 +598,7 @@ function LessonPanel({ lesson }: { lesson: Lesson }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   top: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: S.sm, minHeight: 56, backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border },
-  nameBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 220, minHeight: TOUCH, paddingHorizontal: 4 },
+  nameBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 220, flexShrink: 1, minHeight: TOUCH, paddingHorizontal: 4 },
   name: { fontSize: 16, fontWeight: '700', color: C.ink },
   nameInput: { minWidth: 160, minHeight: 40, borderWidth: 1, borderColor: C.accent, borderRadius: R.sm, paddingHorizontal: S.sm, fontSize: 16, color: C.ink },
   speedBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: TOUCH, paddingHorizontal: S.sm, borderRadius: R.md, backgroundColor: C.sunken },

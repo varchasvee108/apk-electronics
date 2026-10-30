@@ -813,14 +813,12 @@ function BlockSymbol({ part }: { part: PartInstance }) {
             <Wire x1={q.dx} y1={q.dy} x2={q.dx} y2={top ? y0 : y0 + h} />
             <PinDot x={q.dx} y={q.dy} />
             {!big || /^(D\d+|A\d|5V|GND|3V3|VIN)$/.test(q.name) ? (
-              <Group transform={[{ translateX: q.dx + 0.13 }, { translateY: top ? y0 + 0.25 : y0 + h - 0.25 }, { rotate: Math.PI / 2 }]}>
-                <Label x={top ? 0 : -1.2} y={0.05} text={q.name.replace('COM2', 'COM')} size={0.32} color={C.ink2} align={top ? 'left' : 'left'} />
-              </Group>
+              <Label x={q.dx} y={top ? y0 + 0.5 : y0 + h - 0.22} text={q.name.replace('COM2', 'COM').replace(/^D(\d+)$/, '$1')} size={0.27} color={C.ink2} align="center" />
             ) : null}
           </Group>
         );
       })}
-      <Label x={(x0 + x1) / 2} y={y0 + h / 2 + 0.2} text={chipName(part)} size={big ? 1.2 : 0.5} align="center" bold />
+      {big && <Label x={(x0 + x1) / 2} y={y0 + h / 2 + 0.2} text={chipName(part)} size={1.2} align="center" bold />}
     </>
   );
 }

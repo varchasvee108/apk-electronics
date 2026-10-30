@@ -37,7 +37,7 @@ export function snap(w: Pt): Pt {
 }
 
 /** Bounds of everything in the document (grid units). */
-export function docBounds(doc: CircuitDoc): { x0: number; y0: number; x1: number; y1: number } {
+export function docBounds(doc: CircuitDoc, withBoard = true): { x0: number; y0: number; x1: number; y1: number } {
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
@@ -48,12 +48,12 @@ export function docBounds(doc: CircuitDoc): { x0: number; y0: number; x1: number
     x1 = Math.max(x1, c);
     y1 = Math.max(y1, d);
   };
-  if (doc.board === 'breadboard') grow(0, 0, BB.width, BB.height);
+  if (doc.board === 'breadboard' && withBoard) grow(0, 0, BB.width, BB.height);
   for (const p of doc.parts) {
     const b = partBounds(p);
     grow(b.x0, b.y0, b.x1, b.y1);
   }
-  for (const w of doc.wires) grow(Math.min(w.a.x, w.b.x), Math.min(w.a.y, w.b.y), Math.max(w.a.x, w.b.x), Math.max(w.a.y, w.b.y));
+  if (withBoard || doc.board === 'none') for (const w of doc.wires) grow(Math.min(w.a.x, w.b.x), Math.min(w.a.y, w.b.y), Math.max(w.a.x, w.b.x), Math.max(w.a.y, w.b.y));
   if (!Number.isFinite(x0)) return { x0: -10, y0: -10, x1: 30, y1: 20 };
   return { x0: x0 - 2, y0: y0 - 2, x1: x1 + 2, y1: y1 + 2 };
 }

@@ -13,7 +13,7 @@ import { C, T } from '@/theme';
  * /bench/sandbox          a powered breadboard with no goals
  */
 export default function BenchScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, power } = useLocalSearchParams<{ id: string; power?: string }>();
   const loaded = useMemo(() => {
     if (!id) return null;
     if (id === 'sandbox') return { doc: sandboxDoc(), persist: false };
@@ -30,5 +30,5 @@ export default function BenchScreen() {
         <Text style={T.body}>Circuit not found.</Text>
       </View>
     );
-  return <Workbench initialDoc={loaded.doc} persist={loaded.persist} />;
+  return <Workbench initialDoc={loaded.doc} persist={loaded.persist} autoPower={power === '1'} />;
 }

@@ -72,6 +72,8 @@ class SimController {
   private speedEma = 0;
   timeScale = 1;
   timePerDiv = 1e-3;
+  /** Number of mounted views (scope, logic analyzer) that need fine time resolution. */
+  private viewers = 0;
   dmmMode: DmmMode = 'V';
   failures = true;
   trace = new TraceBuffer();
@@ -144,7 +146,18 @@ class SimController {
   }
 
   private maxStep(): number {
-    return Math.max(1e-9, Math.min(0.01, this.timeScale / 240, this.timePerDiv / 25));
+    const traceLimit = this.viewers > 0 ? this.timePerDiv / 15 : Infinity;
+    return Math.max(1e-9, Math.min(0.01, this.timeScale / 240, traceLimit));
+  }
+
+  /** Scope / logic analyzer mounted: sample finely. Returns the matching release function. */
+  attachViewer(): () => void {
+    this.viewers++;
+    if (this.sim) this.sim.maxStep = this.maxStep();
+    return () => {
+      this.viewers--;
+      if (this.sim) this.sim.maxStep = this.maxStep();
+    };
   }
 
   // ------------------------------------------------------------------ run control

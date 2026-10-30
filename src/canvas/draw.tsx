@@ -1,19 +1,29 @@
-import { Group, Skia, Text, matchFont, type SkFont, type SkPath } from '@shopify/react-native-skia';
+import { Group, Skia, Text, matchFont, type SkFont, type SkPath, type SkTypeface } from '@shopify/react-native-skia';
 import { Platform } from 'react-native';
 
 /** Screen pixels per grid unit at zoom 1. */
 export const U = 24;
 
-const family = Platform.select({ ios: 'Helvetica', default: 'sans-serif' }) as string;
+const systemFamily = Platform.select({ ios: 'Helvetica', default: 'sans-serif' }) as string;
 let fontCache: { regular: SkFont; bold: SkFont } | null = null;
+let faces: { regular: SkTypeface; bold: SkTypeface } | null = null;
+
+/** Register the bundled Inter typefaces so canvas text looks the same on every platform (and works on the web). */
+export function setTypefaces(regular: SkTypeface, bold: SkTypeface): void {
+  if (faces?.regular === regular && faces.bold === bold) return;
+  faces = { regular, bold };
+  fontCache = null;
+}
 
 /** Fonts are created at 10 px and scaled into grid units by <Label>. */
 export function fonts(): { regular: SkFont; bold: SkFont } {
   if (!fontCache) {
-    fontCache = {
-      regular: matchFont({ fontFamily: family, fontSize: 10, fontWeight: '400' }),
-      bold: matchFont({ fontFamily: family, fontSize: 10, fontWeight: '700' }),
-    };
+    fontCache = faces
+      ? { regular: Skia.Font(faces.regular, 10), bold: Skia.Font(faces.bold, 10) }
+      : {
+          regular: matchFont({ fontFamily: systemFamily, fontSize: 10, fontWeight: '400' }),
+          bold: matchFont({ fontFamily: systemFamily, fontSize: 10, fontWeight: '700' }),
+        };
   }
   return fontCache;
 }

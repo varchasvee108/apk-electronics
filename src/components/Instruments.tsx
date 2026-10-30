@@ -157,8 +157,59 @@ function Scope() {
   const [frozen, setFrozen] = useState<{ t: number[]; ch: Record<string, number[]> } | null>(null);
   const tdiv = TIME_DIVS[tdivIdx];
   useEffect(() => controller.setTimePerDiv(tdiv), [tdiv]);
+  useEffect(() => controller.attachViewer(), []);
   const tr = controller.trace;
   const data = hold && frozen ? frozen : { t: tr.t, ch: tr.ch };
+
+  // Auto-set: fit V/div to each channel, then find the period and show ~2.5 cycles.
+  const [autoStage, setAutoStage] = useState<number | null>(0);
+  const autoset = () => setAutoStage(0);
+  useEffect(() => {
+    if (autoStage === null || status !== 'running') return;
+    const timer = setTimeout(() => {
+      const t = tr.t;
+      if (t.length < 20) return setAutoStage(autoStage);
+      const nv = [...vdiv];
+      let trigK = -1;
+      let freq = 0;
+      let mid = 0;
+      SCOPE_CHANNELS.forEach((k, c) => {
+        const y = (tr.ch[k] ?? []).filter(Number.isFinite);
+        if (!probes[k] || y.length < 10) return;
+        const mx = Math.max(...y);
+        const mn = Math.min(...y);
+        const peak = Math.max(Math.abs(mx), Math.abs(mn), 1e-3);
+        const fit = VOLT_DIVS.findIndex((d) => peak / d <= 3.6);
+        nv[c] = fit < 0 ? VOLT_DIVS.length - 1 : fit;
+        if (trigK < 0 && mx - mn > 0.02) {
+          const m = (mx + mn) / 2;
+          const ys = tr.ch[k] ?? [];
+          const rises: number[] = [];
+          for (let i = 1; i < ys.length; i++) if (ys[i - 1] < m && ys[i] >= m) rises.push(t[i]);
+          if (rises.length >= 3) {
+            trigK = c;
+            mid = m;
+            freq = (rises.length - 1) / (rises[rises.length - 1] - rises[0]);
+          }
+        }
+      });
+      setVdiv(nv);
+      if (trigK >= 0 && freq > 0) {
+        const want = 2.5 / freq / 10;
+        const idx = TIME_DIVS.findIndex((d) => d >= want);
+        setTdivIdx(idx < 0 ? TIME_DIVS.length - 1 : idx);
+        setTrigCh(trigK);
+        setTrigLevel(Number(mid.toPrecision(3)));
+        setRising(true);
+        setAutoStage(null);
+      } else if (tdivIdx < TIME_DIVS.length - 1 && autoStage < 8) {
+        // no repeating signal captured yet: widen the window and look again
+        setTdivIdx(Math.min(TIME_DIVS.length - 1, tdivIdx + 3));
+        setAutoStage(autoStage + 1);
+      } else setAutoStage(null);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [autoStage, status, tdivIdx, vdiv, probes, tr]);
 
   // trigger: latest crossing that leaves a full screen after it (trigger at 1 division)
   const span = tdiv * 10;
@@ -286,6 +337,7 @@ function Scope() {
         <Text style={[T.mono, { minWidth: 90, textAlign: 'center' }]}>{formatEng(tdiv, 's')}/div</Text>
         <Button compact icon="add" accessibilityLabel="Slower timebase" onPress={() => setTdivIdx(Math.min(TIME_DIVS.length - 1, tdivIdx + 1))} />
         <Chip label={hold ? 'Run' : 'Hold'} active={hold} onPress={() => (hold ? setHold(false) : (setFrozen({ t: [...tr.t], ch: Object.fromEntries(Object.entries(tr.ch).map(([k, v]) => [k, [...v]])) }), setHold(true)))} />
+        <Chip label={autoStage !== null ? 'Auto-set…' : 'Auto-set'} active={autoStage !== null} onPress={autoset} />
         <Chip label="FFT" active={fft} onPress={() => setFft(!fft)} />
         <Chip label="Cursors" active={!!cursors} onPress={() => setCursors(cursors ? null : [0.3, 0.6])} />
       </View>
@@ -345,6 +397,7 @@ function LogicAnalyzer() {
   const [th, setTh] = useState(2.5);
   const tdiv = TIME_DIVS[tdivIdx];
   useEffect(() => controller.setTimePerDiv(tdiv), [tdiv]);
+  useEffect(() => controller.attachViewer(), []);
   const tr = controller.trace;
   const span = tdiv * 10;
   const tLast = tr.t[tr.t.length - 1] ?? 0;
