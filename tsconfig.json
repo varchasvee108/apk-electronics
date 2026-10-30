@@ -8,6 +8,9 @@
       ],
       "@/assets/*": [
         "./assets/*"
+      ],
+      "@sim/*": [
+        "./sim-core/src/*"
       ]
     }
   },
@@ -16,5 +19,11 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "sim-core/__tests__",
+    "src/**/__tests__",
+    "jest.config.js"
   ]
 }

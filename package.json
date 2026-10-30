@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ui": "~58.0.25",
+    "@expo/vector-icons": "^15.0.2",
     "@shopify/react-native-skia": "2.14.0",
     "avr8js": "^0.21.1",
     "expo": "~58.0.21",
@@ -44,11 +45,12 @@
   },
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "jest",
+    "typecheck": "tsc --noEmit && tsc -p sim-core/tsconfig.json"
   },
   "private": true
 }
