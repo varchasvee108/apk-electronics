@@ -4,6 +4,7 @@ import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { Pt, Wire } from '@/model/types';
 import { C, voltageColor } from '@/theme';
 import { alpha } from './draw';
+import { wireControl } from './hit';
 
 const DASH = [0.16, 0.62];
 const PERIOD = DASH[0] + DASH[1];
@@ -19,17 +20,8 @@ function wirePath(a: Pt, b: Pt, arc: boolean) {
   const p = Skia.PathBuilder.Make();
   p.moveTo(a.x, a.y);
   if (arc) {
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const bow = Math.min(1.2, len * 0.12);
-    // bow "up" the screen so long wires don't hide holes below
-    const nx = -dy / len;
-    const ny = dx / len;
-    const sgn = ny > 0 ? -1 : 1;
-    p.quadTo(mx + nx * bow * sgn, my + ny * bow * sgn, b.x, b.y);
+    const c = wireControl(a, b);
+    p.quadTo(c.x, c.y, b.x, b.y);
   } else p.lineTo(b.x, b.y);
   return p.build();
 }

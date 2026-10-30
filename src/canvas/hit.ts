@@ -19,11 +19,37 @@ function segDist(p: Pt, a: Pt, b: Pt): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-export function hitWire(doc: CircuitDoc, w: Pt, tol = 0.45): Wire | null {
+/** Control point of a breadboard jumper's arc (shared by drawing and hit testing). */
+export function wireControl(a: Pt, b: Pt): Pt {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const bow = Math.min(1.2, len * 0.12);
+  const nx = -dy / len;
+  const ny = dx / len;
+  // bow "up" the screen so long wires don't hide the holes below
+  const sgn = ny > 0 ? -1 : 1;
+  return { x: (a.x + b.x) / 2 + nx * bow * sgn, y: (a.y + b.y) / 2 + ny * bow * sgn };
+}
+
+/** Wire under point w; `arc` matches the curved breadboard rendering. */
+export function hitWire(doc: CircuitDoc, w: Pt, arc = false, tol = 0.45): Wire | null {
   let best: Wire | null = null;
   let bd = tol;
   for (const wire of doc.wires) {
-    const d = segDist(w, wire.a, wire.b);
+    let d: number;
+    if (arc) {
+      const c = wireControl(wire.a, wire.b);
+      d = Infinity;
+      let prev = wire.a;
+      for (let k = 1; k <= 16; k++) {
+        const t = k / 16;
+        const u = 1 - t;
+        const q = { x: u * u * wire.a.x + 2 * u * t * c.x + t * t * wire.b.x, y: u * u * wire.a.y + 2 * u * t * c.y + t * t * wire.b.y };
+        d = Math.min(d, segDist(w, prev, q));
+        prev = q;
+      }
+    } else d = segDist(w, wire.a, wire.b);
     if (d < bd) {
       bd = d;
       best = wire;

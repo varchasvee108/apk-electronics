@@ -88,7 +88,8 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   const [lastSel, setLastSel] = useState(selection);
   if (lastSel !== selection) {
     setLastSel(selection);
-    if ((selection.parts.length || selection.wires.length) && !(tab === 'lesson' && wide)) setTab('inspect');
+    // show the settings of whatever was just selected (the lesson stays one tap away)
+    if (selection.parts.length || selection.wires.length) setTab('inspect');
   }
 
   const onReady = useCallback((a: CanvasApi) => {
@@ -149,6 +150,7 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
             showFlow={showFlow}
             setShowFlow={setShowFlow}
             fit={() => api.current?.fit()}
+            zoom={(f) => api.current?.zoom(f)}
           />
         </View>
         <View style={wide ? styles.right : [styles.bottom, { height: collapsed ? 66 : Math.max(260, height * 0.42) }]}>{panel}</View>
@@ -257,6 +259,7 @@ function ToolStrip(props: {
   showFlow: boolean;
   setShowFlow: (b: boolean) => void;
   fit: () => void;
+  zoom: (f: number) => void;
 }) {
   const tool = useCircuit((s) => s.tool);
   const view = useCircuit((s) => s.view);
@@ -291,6 +294,8 @@ function ToolStrip(props: {
         </View>
       )}
       <View style={[styles.strip, { right: S.sm, top: props.wide ? S.sm : S.sm + 64 }]}>
+        <IconButton icon="remove-circle-outline" label="Zoom out" onPress={() => props.zoom(1 / 1.4)} />
+        <IconButton icon="add-circle-outline" label="Zoom in" onPress={() => props.zoom(1.4)} />
         <IconButton icon="contract-outline" label="Fit to view" onPress={props.fit} />
         <IconButton icon="color-palette-outline" label="Colour wires by voltage" active={props.showVoltage} onPress={() => props.setShowVoltage(!props.showVoltage)} />
         <IconButton icon="flash-outline" label="Animate current flow" active={props.showFlow} onPress={() => props.setShowFlow(!props.showFlow)} />

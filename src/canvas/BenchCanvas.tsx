@@ -1,6 +1,6 @@
 import { Canvas, Circle, Group, Line, Picture, Rect, RoundedRect, useCanvasRef, vec } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { Platform, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
   GestureDetector,
   useCompetingGestures,
@@ -29,6 +29,8 @@ import { NetLine, WireView } from './WireView';
 
 export interface CanvasApi {
   fit(): void;
+  /** Zoom about the centre of the view (factor > 1 zooms in). */
+  zoom(factor: number): void;
   center(): Pt;
   snapshot(): string | null;
 }
@@ -74,6 +76,10 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const wireEnds = useSharedValue<{ id: string; ax: number; ay: number; bx: number; by: number; sel: boolean }[]>([]);
   const grabbed = useSharedValue({ id: '', end: 'a' as 'a' | 'b' });
   const lastFocal = useSharedValue({ x: 0, y: 0 });
+  /** Finger position (view pixels) at touch-down, so drags include the movement before activation. */
+  const touchStart = useSharedValue({ x: 0, y: 0 });
+  /** Long-press (pin a readout) is switched off while a push button is held, so holding never releases it. */
+  const longPressOn = useSharedValue(true);
   const pStart = useSharedValue({ x: 0, y: 0 });
   const pEnd = useSharedValue({ x: 0, y: 0 });
   const boxes = useSharedValue<Box[]>([]);
@@ -138,13 +144,22 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   useEffect(() => {
     onReady?.({
       fit,
+      zoom: (f: number) => {
+        const ns = Math.max(4, Math.min(140, sc.get() * f));
+        const k = ns / sc.get();
+        const cx = size.w / 2;
+        const cy = size.h / 2;
+        tx.set(cx - (cx - tx.get()) * k);
+        ty.set(cy - (cy - ty.get()) * k);
+        sc.set(ns);
+      },
       center: () => toWorld(size.w / 2, size.h / 2),
       snapshot: () => {
         const img = canvasRef.current?.makeImageSnapshot();
         return img ? img.encodeToBase64() : null;
       },
     });
-  }, [onReady, fit, toWorld, size, canvasRef]);
+  }, [onReady, fit, toWorld, size, canvasRef, sc, tx, ty]);
 
   // ---------------------------------------------------------------- JS-side handlers
   const onDragStart = useCallback((id: string) => {
@@ -224,7 +239,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
       const cur = useSim.getState().ex;
       // jumper wires are not drawn in the schematic of a breadboard circuit, so they can't be tapped there
       const wiresVisible = st.view !== 'schematic' || st.doc.board === 'none';
-      const wire = wiresVisible ? hitWire(st.doc, w) : null;
+      const wire = wiresVisible ? hitWire(st.doc, w, st.view === 'breadboard') : null;
       if (wire) {
         st.select({ wires: [wire.id] }, st.tool === 'multi');
         st.setFocusNet(cur ? (nodeAt(cur, wire.a) ?? null) : null);
@@ -265,6 +280,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     onBegin: (e) => {
       'worklet';
       const w = { x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() };
+      touchStart.set({ x: e.x, y: e.y });
       mode.set('pan');
       const t = toolSv.get();
       if (t === 'wire') {
@@ -297,6 +313,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
           const b = bs[i];
           if (w.x >= b.x0 && w.x <= b.x1 && w.y >= b.y0 && w.y <= b.y1) {
             if (runningSv.get() && b.type === 'button') {
+              longPressOn.set(false);
               mode.set('press');
               pStart.set({ x: i, y: 0 });
               scheduleOnRN(press, b.id, true);
@@ -325,8 +342,9 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         tx.set(tx.get() + e.changeX);
         ty.set(ty.get() + e.changeY);
       } else if (m === 'part') {
-        drag.dx.set(e.translationX / sc.get());
-        drag.dy.set(e.translationY / sc.get());
+        const t0 = touchStart.get();
+        drag.dx.set((e.x - t0.x) / sc.get());
+        drag.dy.set((e.y - t0.y) / sc.get());
       } else if (m === 'wire' || m === 'wireEnd') {
         pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
       } else if (m === 'marquee') {
@@ -346,6 +364,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
       } else if (m === 'press') {
         const b = boxes.get()[pStart.get().x];
         if (b) scheduleOnRN(press, b.id, false);
+        longPressOn.set(true);
       } else if (m === 'wire' && !e.canceled) {
         scheduleOnRN(onWire, pStart.get().x, pStart.get().y, Math.round(pEnd.get().x), Math.round(pEnd.get().y));
       } else if (m === 'wireEnd' && !e.canceled) {
@@ -384,6 +403,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   });
   const longPress = useLongPressGesture({
     runOnJS: true,
+    enabled: longPressOn,
     minDuration: 550,
     onActivate: (e) => handleLongPress(e.x, e.y),
   });
@@ -399,6 +419,15 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const my = useDerivedValue(() => Math.min(pStart.get().y, pEnd.get().y));
   const mw = useDerivedValue(() => Math.abs(pEnd.get().x - pStart.get().x));
   const mh = useDerivedValue(() => Math.abs(pEnd.get().y - pStart.get().y));
+
+  // Web-only test hooks: lets automated browser tests map grid points to screen pixels.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const g = globalThis as unknown as { __benchCam?: () => { tx: number; ty: number; sc: number }; __benchStore?: typeof useCircuit; __benchSim?: typeof useSim };
+    g.__benchCam = () => ({ tx: tx.get(), ty: ty.get(), sc: sc.get() });
+    g.__benchStore = useCircuit;
+    g.__benchSim = useSim;
+  }, [tx, ty, sc]);
 
   const onLayout = (e: LayoutChangeEvent) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height });
 
