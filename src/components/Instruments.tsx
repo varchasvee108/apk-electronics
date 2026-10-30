@@ -66,11 +66,8 @@ function Multimeter() {
   const status = useSim((s) => s.status);
   const dmm = useSim((s) => s.snapshot?.dmm ?? null);
   const mode = useSim((s) => s.dmmMode);
-  const [ohms, setOhms] = useState<{ ohms: number; note?: string } | null>(null);
-  const continuity = useMemo(() => mode === 'Ω' && ohms && ohms.ohms < 50, [mode, ohms]);
-  useEffect(() => {
-    if (mode === 'Ω' && status === 'off') setOhms(controller.measureOhms(doc));
-  }, [mode, status, doc]);
+  const ohms = useMemo(() => (mode === 'Ω' && status === 'off' ? controller.measureOhms(doc) : null), [mode, status, doc]);
+  const continuity = mode === 'Ω' && !!ohms && ohms.ohms < 50;
   const both = !!doc.probes['dmm+'] && !!doc.probes['dmm-'];
   let display = '—';
   let sub = '';

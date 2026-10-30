@@ -263,9 +263,6 @@ export class Transformer extends Device {
 
 /** Ideal-ish switch: a small resistance when closed, a huge one when open. */
 export class Switch extends Device {
-  constructor(spec: ElementSpec) {
-    super(spec);
-  }
   g(): number {
     return this.bool('closed', false) ? 1 / this.num('ron', 0.02) : 1 / this.num('roff', 1e9);
   }

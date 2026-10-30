@@ -43,9 +43,6 @@ function Wire({ x1, y1, x2, y2 }: { x1: number; y1: number; x2: number; y2: numb
 function Stroke({ d, color = INK, w = SW }: { d: string; color?: string; w?: number }) {
   return <Path path={P(d)} color={color} style="stroke" strokeWidth={w} strokeJoin="round" strokeCap="round" />;
 }
-function Fill({ d, color }: { d: string; color: string }) {
-  return <Path path={P(d)} color={color} />;
-}
 function PinDot({ x, y }: { x: number; y: number }) {
   return <Circle cx={x} cy={y} r={0.13} color={INK} />;
 }

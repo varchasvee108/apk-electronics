@@ -81,24 +81,21 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const canvasRef = useCanvasRef();
 
   useFrameCallback((f) => {
-    clock.value += (f.timeSincePreviousFrame ?? 16) / 1000;
+    clock.set(clock.get() + (f.timeSincePreviousFrame ?? 16) / 1000);
   });
 
   useEffect(() => {
-    boxes.value = doc.parts.map((p) => ({ id: p.id, type: p.type, ...partBounds(p) }));
+    boxes.set(doc.parts.map((p) => ({ id: p.id, type: p.type, ...partBounds(p) })));
   }, [doc.parts, boxes]);
   useEffect(() => {
-    selIds.value = selection.parts;
+    selIds.set(selection.parts);
   }, [selection.parts, selIds]);
   useEffect(() => {
-    toolSv.value = tool;
-    if (tool !== 'wire') {
-      pendingWire.current = null;
-      setPendingWireUi(null);
-    }
+    toolSv.set(tool);
+    if (tool !== 'wire') pendingWire.current = null;
   }, [tool, toolSv]);
   useEffect(() => {
-    runningSv.value = powered;
+    runningSv.set(powered);
   }, [powered, runningSv]);
 
   const ex = controller.ex;
@@ -108,9 +105,9 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const fit = useCallback(() => {
     const b = docBounds(doc);
     const s = Math.max(4, Math.min(90, Math.min(size.w / (b.x1 - b.x0), size.h / (b.y1 - b.y0))));
-    sc.value = s;
-    tx.value = (size.w - (b.x1 - b.x0) * s) / 2 - b.x0 * s;
-    ty.value = (size.h - (b.y1 - b.y0) * s) / 2 - b.y0 * s;
+    sc.set(s);
+    tx.set((size.w - (b.x1 - b.x0) * s) / 2 - b.x0 * s);
+    ty.set((size.h - (b.y1 - b.y0) * s) / 2 - b.y0 * s);
   }, [doc, size, sc, tx, ty]);
 
   const fittedFor = useRef('');
@@ -121,7 +118,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     }
   }, [doc.id, size, fit]);
 
-  const toWorld = useCallback((x: number, y: number): Pt => ({ x: (x - tx.value) / sc.value, y: (y - ty.value) / sc.value }), [tx, ty, sc]);
+  const toWorld = useCallback((x: number, y: number): Pt => ({ x: (x - tx.get()) / sc.get(), y: (y - ty.get()) / sc.get() }), [tx, ty, sc]);
 
   useEffect(() => {
     onReady?.({
@@ -142,11 +139,11 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
 
   const onDragEnd = useCallback(
     (dx: number, dy: number) => {
-      const ids = drag.ids.value;
+      const ids = drag.ids.get();
       if (ids.length && (dx || dy)) useCircuit.getState().movePartsBy(ids, dx, dy);
-      drag.ids.value = [];
-      drag.dx.value = 0;
-      drag.dy.value = 0;
+      drag.ids.set([]);
+      drag.dx.set(0);
+      drag.dy.set(0);
     },
     [drag.ids, drag.dx, drag.dy],
   );
@@ -245,73 +242,73 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     minDistance: 4,
     onBegin: (e) => {
       'worklet';
-      const w = { x: (e.x - tx.value) / sc.value, y: (e.y - ty.value) / sc.value };
-      mode.value = 'pan';
-      const t = toolSv.value;
+      const w = { x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() };
+      mode.set('pan');
+      const t = toolSv.get();
       if (t === 'wire') {
-        mode.value = 'wire';
-        pStart.value = { x: Math.round(w.x), y: Math.round(w.y) };
-        pEnd.value = pStart.value;
+        mode.set('wire');
+        pStart.set({ x: Math.round(w.x), y: Math.round(w.y) });
+        pEnd.set(pStart.get());
         return;
       }
       if (t === 'select' || t === 'multi') {
-        const bs = boxes.value;
+        const bs = boxes.get();
         for (let i = bs.length - 1; i >= 0; i--) {
           const b = bs[i];
           if (w.x >= b.x0 && w.x <= b.x1 && w.y >= b.y0 && w.y <= b.y1) {
-            if (runningSv.value && b.type === 'button') {
-              mode.value = 'press';
-              pStart.value = { x: i, y: 0 };
+            if (runningSv.get() && b.type === 'button') {
+              mode.set('press');
+              pStart.set({ x: i, y: 0 });
               scheduleOnRN(press, b.id, true);
               return;
             }
-            mode.value = 'part';
-            drag.ids.value = selIds.value.includes(b.id) ? selIds.value : [b.id];
-            drag.dx.value = 0;
-            drag.dy.value = 0;
+            mode.set('part');
+            drag.ids.set(selIds.get().includes(b.id) ? selIds.get() : [b.id]);
+            drag.dx.set(0);
+            drag.dy.set(0);
             scheduleOnRN(onDragStart, b.id);
             return;
           }
         }
         if (t === 'multi') {
-          mode.value = 'marquee';
-          pStart.value = w;
-          pEnd.value = w;
+          mode.set('marquee');
+          pStart.set(w);
+          pEnd.set(w);
         }
       }
     },
     onUpdate: (e) => {
       'worklet';
-      const m = mode.value;
+      const m = mode.get();
       if (m === 'pan') {
-        tx.value += e.changeX;
-        ty.value += e.changeY;
+        tx.set(tx.get() + e.changeX);
+        ty.set(ty.get() + e.changeY);
       } else if (m === 'part') {
-        drag.dx.value = e.translationX / sc.value;
-        drag.dy.value = e.translationY / sc.value;
+        drag.dx.set(e.translationX / sc.get());
+        drag.dy.set(e.translationY / sc.get());
       } else if (m === 'wire') {
-        pEnd.value = { x: (e.x - tx.value) / sc.value, y: (e.y - ty.value) / sc.value };
+        pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
       } else if (m === 'marquee') {
-        pEnd.value = { x: (e.x - tx.value) / sc.value, y: (e.y - ty.value) / sc.value };
+        pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
       }
     },
     onFinalize: (e) => {
       'worklet';
-      const m = mode.value;
-      mode.value = 'none';
+      const m = mode.get();
+      mode.set('none');
       if (m === 'part') {
         if (e.canceled) {
-          drag.dx.value = 0;
-          drag.dy.value = 0;
+          drag.dx.set(0);
+          drag.dy.set(0);
         }
-        scheduleOnRN(onDragEnd, Math.round(drag.dx.value), Math.round(drag.dy.value));
+        scheduleOnRN(onDragEnd, Math.round(drag.dx.get()), Math.round(drag.dy.get()));
       } else if (m === 'press') {
-        const b = boxes.value[pStart.value.x];
+        const b = boxes.get()[pStart.get().x];
         if (b) scheduleOnRN(press, b.id, false);
       } else if (m === 'wire' && !e.canceled) {
-        scheduleOnRN(onWire, pStart.value.x, pStart.value.y, Math.round(pEnd.value.x), Math.round(pEnd.value.y));
+        scheduleOnRN(onWire, pStart.get().x, pStart.get().y, Math.round(pEnd.get().x), Math.round(pEnd.get().y));
       } else if (m === 'marquee' && !e.canceled) {
-        scheduleOnRN(onMarquee, pStart.value.x, pStart.value.y, pEnd.value.x, pEnd.value.y);
+        scheduleOnRN(onMarquee, pStart.get().x, pStart.get().y, pEnd.get().x, pEnd.get().y);
       }
     },
   });
@@ -319,11 +316,11 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const pinch = usePinchGesture({
     onUpdate: (e) => {
       'worklet';
-      const ns = Math.max(4, Math.min(140, sc.value * e.scaleChange));
-      const k = ns / sc.value;
-      tx.value = e.focalX - (e.focalX - tx.value) * k;
-      ty.value = e.focalY - (e.focalY - ty.value) * k;
-      sc.value = ns;
+      const ns = Math.max(4, Math.min(140, sc.get() * e.scaleChange));
+      const k = ns / sc.get();
+      tx.set(e.focalX - (e.focalX - tx.get()) * k);
+      ty.set(e.focalY - (e.focalY - ty.get()) * k);
+      sc.set(ns);
     },
   });
 
@@ -340,15 +337,15 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const gesture = useSimultaneousGestures(pinch, useCompetingGestures(pan, longPress, tap));
 
   // ---------------------------------------------------------------- derived drawing values
-  const camera = useDerivedValue(() => [{ translateX: tx.value }, { translateY: ty.value }, { scale: sc.value }]);
-  const wireOn = useDerivedValue(() => (mode.value === 'wire' ? 1 : 0));
-  const wP1 = useDerivedValue(() => vec(pStart.value.x, pStart.value.y));
-  const wP2 = useDerivedValue(() => vec(Math.round(pEnd.value.x), Math.round(pEnd.value.y)));
-  const marqueeOn = useDerivedValue(() => (mode.value === 'marquee' ? 1 : 0));
-  const mx = useDerivedValue(() => Math.min(pStart.value.x, pEnd.value.x));
-  const my = useDerivedValue(() => Math.min(pStart.value.y, pEnd.value.y));
-  const mw = useDerivedValue(() => Math.abs(pEnd.value.x - pStart.value.x));
-  const mh = useDerivedValue(() => Math.abs(pEnd.value.y - pStart.value.y));
+  const camera = useDerivedValue(() => [{ translateX: tx.get() }, { translateY: ty.get() }, { scale: sc.get() }]);
+  const wireOn = useDerivedValue(() => (mode.get() === 'wire' ? 1 : 0));
+  const wP1 = useDerivedValue(() => vec(pStart.get().x, pStart.get().y));
+  const wP2 = useDerivedValue(() => vec(Math.round(pEnd.get().x), Math.round(pEnd.get().y)));
+  const marqueeOn = useDerivedValue(() => (mode.get() === 'marquee' ? 1 : 0));
+  const mx = useDerivedValue(() => Math.min(pStart.get().x, pEnd.get().x));
+  const my = useDerivedValue(() => Math.min(pStart.get().y, pEnd.get().y));
+  const mw = useDerivedValue(() => Math.abs(pEnd.get().x - pStart.get().x));
+  const mh = useDerivedValue(() => Math.abs(pEnd.get().y - pStart.get().y));
 
   const onLayout = (e: LayoutChangeEvent) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height });
 
@@ -411,7 +408,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
               {Object.entries(doc.probes).map(([k, p]) =>
                 p && PROBE_STYLE[k] ? <ProbeMark key={k} p={p} {...PROBE_STYLE[k]} /> : p && k.startsWith('la') ? <ProbeMark key={k} p={p} color="#8E4EC6" text={`L${k.slice(2)}`} /> : null,
               )}
-              {pendingWireUi && <Circle cx={pendingWireUi.x} cy={pendingWireUi.y} r={0.4} color={alpha(C.accent, 0.6)} />}
+              {tool === 'wire' && pendingWireUi && <Circle cx={pendingWireUi.x} cy={pendingWireUi.y} r={0.4} color={alpha(C.accent, 0.6)} />}
               <Group opacity={wireOn}>
                 <Line p1={wP1} p2={wP2} color={useCircuit.getState().wireColor} strokeWidth={0.27} strokeCap="round" />
                 <Circle c={wP2} r={0.3} color={alpha(C.accent, 0.7)} />

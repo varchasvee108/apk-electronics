@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState, type ComponentProps, type ReactNode } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import { formatEng, parseEng } from '@sim/units';
@@ -203,7 +203,12 @@ export function Slider({
 export function ValueInput({ value, unit, onChange, label }: { value: number; unit?: string; onChange: (v: number) => void; label: string }) {
   const [text, setText] = useState(formatEng(value, unit ?? ''));
   const [bad, setBad] = useState(false);
-  useEffect(() => setText(formatEng(value, unit ?? '')), [value, unit]);
+  const [shown, setShown] = useState(value);
+  if (shown !== value) {
+    // the value changed from outside (undo, another control): resync the text
+    setShown(value);
+    setText(formatEng(value, unit ?? ''));
+  }
   const commit = () => {
     const v = parseEng(text);
     if (Number.isFinite(v)) {
