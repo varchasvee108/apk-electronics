@@ -40,6 +40,17 @@
     "experiments": {
       "typedRoutes": false,
       "reactCompiler": false
-    }
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "469af4f8-5ac5-4611-a3eb-5ee00e68fe1d"
+      }
+    },
+    "owner": "vaikruta"
   }
 }
