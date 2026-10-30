@@ -104,6 +104,11 @@ export function evaluate(c: Check, ctx: CheckContext): CheckResult {
       const n = parts.filter((p) => lit(snap, p)).length;
       return { ok: n >= (c.count ?? 1), detail: `${n} lit` };
     }
+    case 'ledOff': {
+      if (!snap) return need();
+      const on = lit(snap, c.part);
+      return { ok: !on, detail: on ? 'lit' : 'dark' };
+    }
     case 'blinks': {
       const m = mem.blinks[c.part];
       return { ok: (m?.count ?? 0) >= c.min, detail: `${m?.count ?? 0} blinks seen` };

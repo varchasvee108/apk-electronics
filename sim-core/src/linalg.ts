@@ -9,6 +9,7 @@ export class DenseSolver {
   private lu: Float64Array;
   private perm: Int32Array;
   private y: Float64Array;
+  private colMax: Float64Array;
   /** Unknown index whose pivot vanished on the last failed factorisation. */
   singularIndex = -1;
 
@@ -19,6 +20,7 @@ export class DenseSolver {
     this.lu = new Float64Array(n * n);
     this.perm = new Int32Array(n);
     this.y = new Float64Array(n);
+    this.colMax = new Float64Array(n);
   }
 
   clear(): void {
@@ -34,14 +36,21 @@ export class DenseSolver {
     lu.set(this.A);
     const perm = this.perm;
     for (let i = 0; i < n; i++) perm[i] = i;
-    // Scale for a relative pivot threshold.
-    let maxAbs = 0;
-    for (let i = 0; i < n * n; i++) {
-      const a = Math.abs(lu[i]);
-      if (a > maxAbs) maxAbs = a;
+    // Pivot threshold relative to each column's own scale. A global threshold wrongly flags weakly
+    // tied nodes (a floating input held only by gmin) as singular whenever large conductances exist
+    // elsewhere, e.g. a capacitor's C/dt right after power-on. Genuinely singular systems (loops of
+    // ideal sources) leave pivots that are zero up to rounding, far below this.
+    const colMax = this.colMax;
+    colMax.fill(0);
+    for (let i = 0; i < n; i++) {
+      const ri = i * n;
+      for (let j = 0; j < n; j++) {
+        const a = Math.abs(lu[ri + j]);
+        if (a > colMax[j]) colMax[j] = a;
+      }
     }
-    const tiny = Math.max(maxAbs * 1e-18, 1e-300);
     for (let k = 0; k < n; k++) {
+      const tiny = Math.max(colMax[k] * 1e-14, 1e-300);
       let p = k;
       let pv = Math.abs(lu[k * n + k]);
       for (let i = k + 1; i < n; i++) {

@@ -64,8 +64,7 @@ describe('lessons', () => {
   test('led lesson: 470 Ω gives 15 mA and passes', () => {
     const lesson = LESSONS.find((l) => l.id === 'led-resistor')!;
     const doc = lesson.build();
-    doc.parts.push({ id: 'rx', type: 'resistor', x: 15, y: 8, rot: 0, props: { r: 470, maxP: 0.25 } }); // c14 → c18
-    doc.wires.push({ id: 'wx', a: { x: 19, y: 7 }, b: { x: 21, y: 7 }, color: '#00f' }); // b18 → b20
+    doc.parts.push({ id: 'rx', type: 'resistor', x: 17, y: 8, rot: 0, props: { r: 470, maxP: 0.25 } }); // c16 → c20
     const ex = extractNetlist(doc);
     const s = new Simulator(ex.netlist);
     s.startTransient();

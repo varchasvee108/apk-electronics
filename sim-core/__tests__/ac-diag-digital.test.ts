@@ -113,6 +113,18 @@ describe('diagnostics', () => {
     expect(Math.abs(sim.read('R1').i)).toBeLessThan(1e-6);
   });
 
+  test('a floating logic input next to a large capacitor is a warning, not a solver error', () => {
+    const nb = new NetlistBuilder().V('VCC', 'vcc', '0', 5).R('R1', 'vcc', 'c', 10e3).C('C1', 'c', '0', 100e-6);
+    // 7404 input 1A left floating
+    nb.add('logic', 'U1', ['float', 'y', '0', 'n2', '0', 'n3', '0', 'n4', '0', 'n5', '0', 'n6', '0', 'vcc'], { chip: '7404' });
+    const sim = new Simulator(nb.build());
+    expect(sim.topology.some((d) => d.code === 'floating-input')).toBe(true);
+    sim.maxStep = 1e-3;
+    sim.startTransient();
+    expect(() => sim.advance(0.05)).not.toThrow();
+    expect(sim.v('y')).toBeGreaterThan(4.5); // floating CMOS input reads low here, so the inverter outputs high
+  });
+
   test('reversed electrolytic capacitor is flagged', () => {
     const sim = new Simulator(
       new NetlistBuilder().V('V1', 'p', '0', 5).R('R1', 'p', 'a', 100).C('C1', '0', 'a', 100e-6, { polarized: true, vmax: 16 }).build(),

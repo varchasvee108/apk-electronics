@@ -7,6 +7,7 @@ export type Check =
   | { kind: 'voltage'; at: string; min: number; max: number; label: string }
   | { kind: 'partVoltage'; part?: string; type?: string; min: number; max: number; label: string }
   | { kind: 'ledOn'; part?: string; count?: number; label: string }
+  | { kind: 'ledOff'; part: string; label: string }
   | { kind: 'blinks'; part: string; min: number; label: string }
   | { kind: 'patterns'; parts: string[]; min: number; label: string }
   | { kind: 'seenAll'; parts: string[]; label: string }
@@ -266,22 +267,52 @@ export const LESSONS: Lesson[] = [
       return b.build('lesson');
     },
   },
+  {
+    id: 'zener-regulator',
+    unit: 'u6',
+    title: 'A Zener voltage regulator',
+    minutes: 8,
+    goal: 'Add a 5.1 V Zener (cathode at column 14, anode at column 18) so the load sits at about 5.1 V.',
+    intro: [
+      'R1 (470 Ω) feeds a 1 kΩ load from 9 V. On its own the divider gives about 6.1 V, and the voltage changes whenever the load or battery changes.',
+      'A reverse-biased Zener conducts just enough current to hold its breakdown voltage: put it across the load and the extra current flows through it instead.',
+    ],
+    hints: [
+      'Place a Zener diode in row d from column 14 to column 18, then tap Rotate twice so its band (cathode) faces column 14, the positive side.',
+      'Watch the Zener’s current in the Inspector: it absorbs whatever the load does not need.',
+    ],
+    checks: [
+      { kind: 'hasPart', type: 'zener', label: 'Zener diode placed' },
+      { kind: 'voltage', at: 'b14', min: 4.95, max: 5.4, label: 'Load voltage held at ≈ 5.1 V' },
+      noDamage,
+    ],
+    build() {
+      const b = rails('Zener regulator');
+      b.wire(railNear('top', '+', 10), 'a10', WIRE.red);
+      b.part('resistor', 'c10', { props: { r: 470 }, id: 'r1' });
+      b.part('resistor', 'e14', { props: { r: 1000 }, id: 'rl' });
+      b.wire('a18', railNear('top', '-', 18), WIRE.black);
+      b.probe('dmm+', 'b14').probe('dmm-', railNear('top', '-', 22));
+      return b.build('lesson');
+    },
+  },
   // ------------------------------------------------------------------ U7
   {
     id: 'led-resistor',
     unit: 'u7',
     title: 'Light an LED safely',
     minutes: 6,
-    goal: 'Add a resistor from column 14 to column 20 so the LED current is 15 mA ± 10 %.',
+    goal: 'Add a resistor from column 16 to column 20 so the LED current is 15 mA ± 10 %.',
     intro: [
       'An LED’s voltage stays near its forward voltage (≈1.9 V for red), so the resistor must set the current: R = (Vs − Vf) / I.',
+      'Column 16 is already wired to +9 V and the LED’s anode sits in column 20. A resistor spans four columns, so place one in row c from column 16 to column 20.',
       'Without a resistor the LED takes far too much current and burns out. Try it if you like, then repair it!',
     ],
-    hints: ['R = (9 − 1.9) V / 0.015 A ≈ 473 Ω → use 470 Ω.', 'Place a resistor in row c starting at column 14; it ends in column 18, so add a wire from 18 to 20, or start it at column 16.'],
+    hints: ['R = (9 − 1.9) V / 0.015 A ≈ 473 Ω → use 470 Ω (yellow, violet, brown).', 'Add a resistor from the parts tray, drag it so its leads sit in c16 and c20, then type 470 in its value box.'],
     checks: [{ kind: 'current', part: 'd1', min: 0.0135, max: 0.0165, label: 'LED current 15 mA ± 10 %' }, noDamage],
     build() {
       const b = rails('LED current limiting');
-      b.wire(railNear('top', '+', 14), 'a14', WIRE.red);
+      b.wire(railNear('top', '+', 16), 'a16', WIRE.red);
       b.part('led', 'd20', { id: 'd1' });
       b.wire('a21', railNear('top', '-', 21), WIRE.black);
       return b.build('lesson');
@@ -407,6 +438,45 @@ export const LESSONS: Lesson[] = [
       return b.build('lesson');
     },
   },
+  {
+    id: 'comparator',
+    unit: 'u10',
+    title: 'Comparator night light',
+    minutes: 10,
+    goal: 'Wire the light-sensor divider (column 42, lower half) to IN− (column 31), then check the LED turns on in the dark and off in bright light.',
+    intro: [
+      'Without feedback an op-amp is a comparator: its output swings high when IN+ > IN− and low when IN+ < IN−.',
+      'IN+ sits at a fixed 4.5 V reference. The LDR and a 10 kΩ resistor form a divider whose voltage falls in the dark. Feed it to IN− and the output goes high, lighting the LED, only when it is dark.',
+    ],
+    hints: [
+      'Wire hole g42 to hole g31.',
+      'While running, select the LDR and drag its light slider below 10 lux, then above 1000 lux.',
+      'IN− is a high-impedance input: until you connect it, it floats, which the circuit check flags.',
+    ],
+    checks: [{ kind: 'nightLight', label: 'LED on when dark (≤ 10 lx), off when bright (≥ 1000 lx)' }, noDamage],
+    build() {
+      const b = rails('Comparator night light', { bottom: true });
+      b.part('lm358', 'e30', { id: 'u1' });
+      b.wire(railNear('top', '+', 30), 'a30', WIRE.red);
+      b.wire('j33', railNear('bottom', '-', 33), WIRE.black);
+      b.wire('a33', railNear('top', '-', 33), WIRE.black);
+      b.wire('b32', 'b31', WIRE.green);
+      b.part('resistor', 'h14', { props: { r: 10e3 }, id: 'ra' });
+      b.wire('j14', railNear('bottom', '+', 14), WIRE.red);
+      b.part('resistor', 'i18', { props: { r: 10e3 }, id: 'rb' });
+      b.wire('j22', railNear('bottom', '-', 22), WIRE.black);
+      b.wire('g18', 'g32', WIRE.yellow);
+      b.part('ldr', 'h40', { id: 'ldr1' });
+      b.wire('j40', railNear('bottom', '+', 40), WIRE.red);
+      b.part('resistor', 'i42', { props: { r: 10e3 }, id: 'rl' });
+      b.wire('j46', railNear('bottom', '-', 46), WIRE.black);
+      b.part('resistor', 'j30', { props: { r: 470 }, id: 'rled' });
+      b.part('led', 'i34', { props: { color: 'yellow' }, id: 'd1' });
+      b.wire('j35', railNear('bottom', '-', 35), WIRE.black);
+      b.probe('ch1', 'h42').probe('ch2', 'h32');
+      return b.build('lesson');
+    },
+  },
   // ------------------------------------------------------------------ U11
   {
     id: 'lowpass',
@@ -494,6 +564,91 @@ export const LESSONS: Lesson[] = [
       return b.build('lesson');
     },
   },
+  {
+    id: 'half-adder',
+    unit: 'u13',
+    title: 'A half adder',
+    minutes: 10,
+    goal: 'Wire both switches to the AND gate (7408 pins 1 and 2: columns 40 and 41), then set A = B = 1: the carry LED lights and the sum LED goes dark.',
+    intro: [
+      'Adding two bits gives a sum bit and a carry bit: 0+0 = 00, 0+1 = 01, 1+0 = 01, 1+1 = 10.',
+      'The sum is A XOR B (the 7486 on the left, already wired). The carry is A AND B (the 7408 on the right). Its inputs are still unconnected.',
+    ],
+    hints: [
+      'Each switch’s middle pin carries its value. Wire g11 → i40 and g15 → i41.',
+      'Try every combination: the green LED (sum) and red LED (carry) show the two output bits.',
+    ],
+    checks: [
+      { kind: 'prop', part: 's1', key: 'pos', equals: true, label: 'A = 1' },
+      { kind: 'prop', part: 's2', key: 'pos', equals: true, label: 'B = 1' },
+      { kind: 'ledOn', part: 'dc', label: 'Carry LED lit (1 + 1 carries)' },
+      { kind: 'ledOff', part: 'ds', label: 'Sum LED dark (1 + 1 = 10)' },
+    ],
+    build() {
+      const b = rails('Half adder', { supply: true, v: 5, bottom: true });
+      for (const [col, type, id] of [
+        [20, 'ic7486', 'u1'],
+        [40, 'ic7408', 'u2'],
+      ] as const) {
+        b.part(type, `e${col}`, { id });
+        b.wire(railNear('top', '+', col), `a${col}`, WIRE.red);
+        b.wire(dipHole(col, 14, 7), railNear('bottom', '-', col + 6), WIRE.black);
+        for (const k of [4, 5]) b.wire(dipHole(col, 14, k), railNear('bottom', '-', col + k), WIRE.black);
+        for (const k of [9, 10, 12, 13]) b.wire(dipHole(col, 14, k), railNear('top', '-', col + 14 - k), WIRE.black);
+      }
+      b.part('toggle', 'i10', { id: 's1', label: 'A' });
+      b.wire('j10', railNear('bottom', '-', 10), WIRE.black);
+      b.wire('j12', railNear('bottom', '+', 12), WIRE.red);
+      b.wire('h11', 'i20', WIRE.yellow);
+      b.part('toggle', 'i14', { id: 's2', label: 'B' });
+      b.wire('j14', railNear('bottom', '-', 14), WIRE.black);
+      b.wire('j16', railNear('bottom', '+', 16), WIRE.red);
+      b.wire('h15', 'i21', WIRE.yellow);
+      b.wire('g22', 'g28', WIRE.green);
+      b.part('resistor', 'h28', { props: { r: 330 }, id: 'r1' });
+      b.part('led', 'i32', { props: { color: 'green' }, id: 'ds', label: 'SUM' });
+      b.wire('j33', railNear('bottom', '-', 33), WIRE.black);
+      b.wire('g42', 'g50', WIRE.orange);
+      b.part('resistor', 'h50', { props: { r: 330 }, id: 'r2' });
+      b.part('led', 'i54', { props: { color: 'red' }, id: 'dc', label: 'CARRY' });
+      b.wire('j55', railNear('bottom', '-', 55), WIRE.black);
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'flipflop-divider',
+    unit: 'u14',
+    title: 'A flip-flop that divides by two',
+    minutes: 10,
+    goal: 'Connect Q̄ (7474 pin 6, column 45) to D (pin 2, column 41) so the flip-flop toggles on every clock pulse.',
+    intro: [
+      'A D flip-flop is one bit of memory: on each rising clock edge, Q copies D and then holds it.',
+      'Feed Q̄ (the opposite of Q) back into D and every clock edge flips Q. The output then runs at exactly half the clock frequency. That is how binary counters and frequency dividers work.',
+      'The 555 (left) blinks its LED once per second as the clock. Watch the flip-flop’s LED blink at half that rate.',
+    ],
+    hints: ['Wire hole g45 to hole g41.', 'Unconnected, D floats and reads 0, so Q is stuck at 0.'],
+    checks: [{ kind: 'blinks', part: 'dq', min: 2, label: 'Flip-flop LED toggles at half the clock rate' }],
+    build() {
+      const b = rails('Flip-flop divider', { supply: true, v: 5, bottom: true });
+      astable555(b, 20);
+      b.part('ic7474', 'e40', { id: 'u2' });
+      const H = (k: number, row = 0) => dipHole(40, 14, k, row);
+      b.wire(railNear('top', '+', 40), H(14), WIRE.red);
+      b.wire(H(7), railNear('bottom', '-', 46), WIRE.black);
+      b.wire(H(1), railNear('bottom', '+', 40), WIRE.red); // 1CLR high
+      b.wire(H(4), railNear('bottom', '+', 43), WIRE.red); // 1PRE high
+      b.wire('j22', H(3, 1), WIRE.yellow); // clock from the 555
+      b.wire(H(13), railNear('top', '+', 41), WIRE.red);
+      b.wire(H(10), railNear('top', '+', 44), WIRE.red);
+      b.wire(H(12), railNear('top', '-', 42), WIRE.black);
+      b.wire(H(11), railNear('top', '-', 43), WIRE.black);
+      b.part('resistor', 'h44', { props: { r: 220 }, id: 'rq' });
+      b.part('led', 'i48', { props: { color: 'green' }, id: 'dq', label: 'Q' });
+      b.wire('j49', railNear('bottom', '-', 49), WIRE.black);
+      b.probe('ch1', 'g22').probe('ch2', 'g44');
+      return b.build('lesson');
+    },
+  },
   // ------------------------------------------------------------------ U14
   {
     id: 'counter',
@@ -532,6 +687,56 @@ export const LESSONS: Lesson[] = [
       b.wire('j55', railNear('bottom', '-', 55), WIRE.black);
       b.wire('j56', railNear('bottom', '-', 56), WIRE.black);
       b.wire('i57', railNear('bottom', '-', 57), WIRE.black);
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'shift-register',
+    unit: 'u14',
+    title: 'Clock bits into a shift register',
+    minutes: 12,
+    goal: 'Wire the LATCH button (column 30, lower half) to RCLK (74HC595 pin 12, column 44), then clock in a pattern and latch it onto the LEDs, twice.',
+    intro: [
+      'A shift register moves bits along a chain of flip-flops, one place per clock. The 74HC595 takes a bit from SER on each rising SRCLK edge, and copies all eight to its outputs on a rising RCLK (latch) edge.',
+      'Set the DATA switch (A = 0, B = 1), press CLOCK to shift that bit in, repeat for each bit, then press LATCH. The first LED shows the newest bit.',
+      'Real push buttons “bounce” and give several edges per press; Bench’s buttons are ideal, so one press is exactly one clock.',
+    ],
+    hints: ['Wire hole g30 to hole c44.', 'Try 1, 0, 0 then LATCH (shows 0 0 1 …), then 1, 1 and LATCH again.', 'This is how an Arduino drives many LEDs from three pins.'],
+    checks: [{ kind: 'patterns', parts: ['bar.0', 'bar.1', 'bar.2', 'bar.3'], min: 3, label: 'Latched at least two different patterns' }],
+    build() {
+      const b = rails('Shift register', { supply: true, v: 5, bottom: true });
+      b.part('ic595', 'e40', { id: 'u1' });
+      const H = (k: number, row = 0) => dipHole(40, 16, k, row);
+      b.wire(railNear('top', '+', 40), H(16), WIRE.red); // VCC
+      b.wire(H(8), railNear('bottom', '-', 47), WIRE.black); // GND
+      b.wire(H(13), railNear('top', '-', 43), WIRE.black); // OE low = outputs on
+      b.wire(H(10), railNear('top', '+', 46), WIRE.red); // SRCLR high
+      b.part('toggle', 'c30', { id: 'sdata', label: 'DATA' });
+      b.wire('a30', railNear('top', '-', 30), WIRE.black);
+      b.wire('a32', railNear('top', '+', 32), WIRE.red);
+      b.wire('b31', H(14, 1), WIRE.yellow); // SER
+      b.part('button', 'h20', { id: 'bclk', label: 'CLOCK' });
+      b.wire('j20', railNear('bottom', '+', 20), WIRE.red);
+      b.part('resistor', 'i22', { props: { r: 10e3 }, id: 'rpd1' });
+      b.wire('j26', railNear('bottom', '-', 26), WIRE.black);
+      b.wire('g22', H(11, 2), WIRE.blue); // SRCLK
+      b.part('button', 'h28', { id: 'blatch', label: 'LATCH' });
+      b.wire('j28', railNear('bottom', '+', 28), WIRE.red);
+      b.part('resistor', 'i30', { props: { r: 10e3 }, id: 'rpd2' });
+      b.wire('j34', railNear('bottom', '-', 34), WIRE.black);
+      b.part('ledbar4', 'e52', { props: { color: 'green' }, id: 'bar' });
+      b.wire(H(15, 1), 'b52', WIRE.green); // QA
+      b.wire(H(1, 1), 'a53', WIRE.green); // QB
+      b.wire(H(2, 1), 'a54', WIRE.green); // QC
+      b.wire(H(3, 1), 'a55', WIRE.green); // QD
+      b.part('resistor', 'g52', { props: { r: 220 }, id: 'r1' });
+      b.part('resistor', 'h53', { props: { r: 220 }, id: 'r2' });
+      b.part('resistor', 'i54', { props: { r: 220 }, id: 'r3' });
+      b.part('resistor', 'j55', { props: { r: 220 }, id: 'r4' });
+      b.wire('j56', railNear('bottom', '-', 56), WIRE.black);
+      b.wire('j57', railNear('bottom', '-', 57), WIRE.black);
+      b.wire('j58', railNear('bottom', '-', 58), WIRE.black);
+      b.wire('i59', railNear('bottom', '-', 59), WIRE.black);
       return b.build('lesson');
     },
   },
@@ -619,6 +824,38 @@ export const LESSONS: Lesson[] = [
     },
   },
   {
+    id: 'arduino-button',
+    unit: 'u16',
+    title: 'Read a button',
+    minutes: 8,
+    goal: 'Wire the button between Arduino pin D2 and GND, then hold it down to light the LED.',
+    intro: [
+      'The Button program sets D2 as an input with the internal pull-up resistor (INPUT_PULLUP), so D2 reads HIGH when nothing is connected.',
+      'A button from D2 to ground pulls it LOW while pressed, and the program then switches pin 13 on. Select the board to read the code.',
+    ],
+    hints: [
+      'Wire the D2 header pin (top header, label 2) to hole j40, and hole j42 to the blue − rail on the bottom (it is connected to GND).',
+      'While running, press and hold the button on the canvas.',
+    ],
+    checks: [
+      { kind: 'prop', part: 'sw1', key: 'pressed', equals: true, label: 'Button held down' },
+      { kind: 'ledOn', part: 'd1', label: 'LED lights while pressed' },
+    ],
+    build() {
+      const b = new DocBuilder('Arduino button');
+      b.part('arduino', { x: 20, y: 28 }, { props: arduinoProgram('button'), id: 'uno' });
+      b.wire({ x: 30, y: 28 }, 'j30', WIRE.yellow); // D13
+      b.part('resistor', 'h30', { props: { r: 220 }, id: 'r1' });
+      b.part('led', 'i34', { id: 'd1' });
+      b.wire('j35', railNear('bottom', '-', 35), WIRE.black);
+      b.wire(railNear('bottom', '-', 28), { x: 29, y: 28 }, WIRE.black); // GND
+      b.wire({ x: 32, y: 21 }, { x: 34, y: 21 }, WIRE.black);
+      b.part('ground', railNear('bottom', '-', 46), { id: 'gnd' });
+      b.part('button', 'h40', { id: 'sw1' });
+      return b.build('lesson');
+    },
+  },
+  {
     id: 'arduino-pot',
     unit: 'u16',
     title: 'Read a potentiometer',
@@ -631,8 +868,8 @@ export const LESSONS: Lesson[] = [
       const b = new DocBuilder('Arduino analog read');
       b.part('arduino', { x: 20, y: 28 }, { props: arduinoProgram('analog-read'), id: 'uno' });
       b.part('pot', { x: 36, y: 52 }, { id: 'rv1', props: { pos: 0.3 } });
-      b.wire({ x: 36, y: 52 }, { x: 33, y: 47 }, WIRE.red);
-      b.wire({ x: 38, y: 52 }, { x: 34, y: 47 }, WIRE.black);
+      b.wire({ x: 36, y: 52 }, { x: 34, y: 47 }, WIRE.black); // GND
+      b.wire({ x: 38, y: 52 }, { x: 33, y: 47 }, WIRE.red); // 5V
       b.part('ground', { x: 35, y: 47 }, { id: 'gnd' });
       return b.build('lesson');
     },

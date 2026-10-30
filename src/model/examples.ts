@@ -66,8 +66,8 @@ export const EXAMPLES: Example[] = [
       const b = new DocBuilder('Voltage dividers');
       addRails(b);
       b.part('pot', 'c20', { id: 'rv1' });
-      b.wire(railNear('top', '+', 20), 'a20', WIRE.red);
-      b.wire('a22', railNear('top', '-', 22), WIRE.black);
+      b.wire('a20', railNear('top', '-', 20), WIRE.black);
+      b.wire(railNear('top', '+', 22), 'a22', WIRE.red);
       b.part('resistor', 'c30', { props: { r: 10e3 }, id: 'r1' });
       b.part('resistor', 'd34', { props: { r: 10e3 }, id: 'r2' });
       b.wire(railNear('top', '+', 30), 'a30', WIRE.red);
@@ -349,8 +349,8 @@ export const EXAMPLES: Example[] = [
       const b = new DocBuilder('Arduino analog read');
       b.part('arduino', { x: 20, y: 28 }, { props: arduinoProgram('analog-read'), id: 'uno' });
       b.part('pot', { x: 36, y: 52 }, { id: 'rv1' });
-      b.wire({ x: 36, y: 52 }, { x: 33, y: 47 }, WIRE.red); // 5V
-      b.wire({ x: 38, y: 52 }, { x: 34, y: 47 }, WIRE.black); // GND
+      b.wire({ x: 36, y: 52 }, { x: 34, y: 47 }, WIRE.black); // GND
+      b.wire({ x: 38, y: 52 }, { x: 33, y: 47 }, WIRE.red); // 5V
       b.wire({ x: 37, y: 52 }, { x: 38, y: 47 }, WIRE.yellow); // A0
       b.part('ground', { x: 35, y: 47 }, { id: 'gnd' });
       return b.build('example');
