@@ -1,56 +1,46 @@
-# Welcome to your Expo app 👋
+# Bench
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An offline electronics lab and teacher for phones and tablets (with a browser build too). You build circuits on a realistic breadboard or a free schematic canvas, then power them on and watch them work. You'll see LEDs light, capacitors charge, scope traces, logic chips counting, and an emulated Arduino running code. There are no accounts, no backend, no AI features and no analytics.
 
-## Get started
+![555 blinker running](docs/screenshots/blinker.png)
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run it
 
 ```bash
-npm run reset-project
+npm install            # also copies CanvasKit for the web build (postinstall)
+npx expo start         # press a (Android), i (iOS) or w (web)
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+Every native module Bench uses (Skia, Reanimated, Gesture Handler, SQLite, file system, sharing, document picker) ships in Expo Go for SDK 58. You can also make a development build with `npx expo run:android` or `bunx`/`npx eas-cli build --profile development`.
 
-### Other setup steps
+Quality gates:
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```bash
+npm test               # 127 Jest tests: solver vs analytic answers, AVR, netlists, examples, lessons
+npm run typecheck      # app + sim-core, TypeScript strict
+npx eslint src sim-core/src
+npx expo-doctor
+```
 
-## Learn more
+## What's inside
 
-To learn more about developing your project with Expo, look at the following resources:
+| Area | Where |
+|---|---|
+| Circuit solver (pure TS, no React) | `sim-core/` (MNA, Newton–Raphson, DC / transient / AC, device models, logic chips, AVR co-simulation, AVR assembler) |
+| Breadboard geometry, parts catalogue, netlist extraction, examples, lessons, glossary | `src/model/` |
+| Simulation runtime (frame-budgeted loop, snapshots, instruments) | `src/sim/` |
+| Skia canvas: breadboard, parts, wires, current flow, schematic symbols, gestures | `src/canvas/` |
+| Workbench, inspector, instruments, parts tray | `src/components/` |
+| Screens (Expo Router) | `src/app/` |
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Architecture and the ngspice decision: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Status, test list and every model simplification: [`docs/STATUS.md`](docs/STATUS.md)
+- Screenshots: [`docs/screenshots/`](docs/screenshots)
 
-## Join the community
+## Arduino: how compilation works
 
-Join our community of developers creating universal apps.
+Bench runs real ATmega328P machine code in avr8js, but it **cannot compile C++ on the device**, because that needs avr-gcc. The six starter programs are hand-written AVR assembly equivalents of the classic sketches, and Bench assembles them on the device. You can edit and re-assemble them. To run your own C++, export a `.hex` from the Arduino IDE (Sketch → Export Compiled Binary) and import it, or paste its text.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Disclaimer
+
+Bench is a learning simulator. Its results come from simplified device models and may differ from real components.
