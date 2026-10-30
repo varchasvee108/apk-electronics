@@ -4,7 +4,8 @@
 
 | Check | Result |
 |---|---|
-| `npm test` (Jest) | **127 / 127 pass**: 65 solver/AVR tests against analytic answers, 5 netlist, 31 example-circuit and 26 lesson tests |
+| `npm test` (Jest) | **179 / 179 pass**: solver/AVR tests against analytic answers, netlists, examples, store editing, file import/export, and **every lesson and challenge solved by a scripted learner** (and shown not to pass before it is built) |
+| Browser end-to-end (`tools/e2e-web.js`) | **34 / 34**: add from tray, drag into holes, type values, draw wires (drag and tap-tap), tap holes, select and re-plug wires, undo, rotate, zoom, hold buttons, flip switches, solve a lesson, every screen opens with no JS errors |
 | `npx tsc --noEmit` and `tsc -p sim-core` | clean (strict) |
 | `npx eslint src sim-core/src` | clean |
 | `npx expo-doctor` | 20/20 checks pass |
@@ -21,11 +22,11 @@ Live-app spot checks (web build): the 555 example's scope auto-set measures **98
 - **Mixed-signal logic:** 7400, 7402, 7404, 7408, 7432, 7486, 7474, 74HC595, 74HC138, 74HC161 and CD4017 with propagation delay; 7-segment display and 4/8-segment LED bars.
 - **Arduino Uno:** avr8js (GPIO, timers/PWM, ADC, USART) co-simulated at exact pin-edge times; serial monitor; on-device AVR assembler; .hex import or paste.
 - **Diagnostics in plain language:** no ground (auto-reference), floating node or input, dangling pin, shorted source, source loop, singular matrix, reverse polarity, over-current, over-power, over-voltage, unpowered chip. Parts fail visibly (LED cracks, resistor smokes and chars, electrolytic pops) and can be repaired.
-- **Editor:** realistic breadboard (5-hole strips, split rails, centre channel, labels); 45 parts in a tray with search; drag with snap, rotate, multi-select (marquee), duplicate, delete; wires by drag or tap-tap with 8 colours; undo/redo; pan and pinch-zoom; tap a hole for its net voltage; long-press to pin a readout. Breadboard, schematic and netlist views share one model. There is also a free schematic canvas document type.
+- **Editor:** realistic breadboard (5-hole strips, split rails, centre channel, labels); 45 parts in a tray with search; drag with snap, rotate in place, multi-select (marquee), duplicate, delete; wires by drag or tap-tap with 8 colours, drag a wire end to re-plug it; wires on off-board terminals follow when a part moves; undo/redo; pan (one or two fingers), pinch-zoom and zoom buttons; tap any hole to highlight every hole it is connected to and see its voltage; long-press to pin a readout. Breadboard, schematic and netlist views share one model. There is also a free schematic canvas document type.
 - **Live visuals:** current-flow dots (direction and log-speed from the solved wire currents), wire colouring by voltage, LED glow from current, capacitor charge level, relay contact, motor rotation, buzzer waves, supply and generator displays.
 - **Instruments:** DMM (V, A in series, Ω and continuity with power off); 4-channel scope (time/div, V/div, trigger channel/edge/level, auto-set, hold, cursors, FFT, auto-measurements); 8-channel logic analyzer; Bode plotter; serial monitor.
 - **"Why is this happening?":** formulas with live numbers for each part type.
-- **Learning:** 16 units and 22 lessons, each with a partial circuit, hints and automatic checks measured from the running circuit. Also 6 challenges, a sandbox, an 83-term glossary, datasheet pages for every part (pinout drawing, specs, how it works, typical circuits) and progress tracking.
+- **Learning:** 16 units and 28 lessons, each with a partial circuit, hints and automatic checks measured from the running circuit. Also 6 challenges, a sandbox, an 83-term glossary, datasheet pages for every part (pinout drawing, specs, how it works, typical circuits) and progress tracking.
 - **Saving:** SQLite on device (localStorage on web), auto-save, rename/duplicate/delete, JSON export/import, Skia screenshot sharing, 17 example circuits.
 - **Platform:** light theme only, landscape-first with a portrait layout, 48 dp touch targets, accessibility labels, engineering notation throughout. On web, CanvasKit is loaded via `index.web.js` and the canvas font is Inter on all platforms.
 
@@ -43,8 +44,19 @@ Live-app spot checks (web build): the 555 example's scope auto-set measures **98
 - **Threading:** the solver runs on the JS thread in ≤ 10 ms slices; gestures and canvas animation run on the UI thread (see the architecture doc).
 - **Scope sampling:** while the scope or logic analyzer is open, steps are capped at time/div ÷ 15.
 
+## Fixed in the bug sweep
+
+- Netlist was read during render but rebuilt after it, so the schematic and hole taps lagged one edit behind. It is now reactive.
+- A screen that was leaving could power off the screen replacing it, and edits made in the last 0.8 s before leaving could be lost.
+- Dragged parts landed one hole short; tapping a curved breadboard wire often missed it; holding a push button longer than ½ s released it.
+- Rotating spun parts around their first pin (the diode lesson was impossible); parts now rotate in place.
+- A floating logic input next to a capacitor produced a false "no unique solution" error (pivot test now per column).
+- Reloading an Arduino program while running made the CPU try to catch up from t = 0.
+- Potentiometer examples turned the "wrong way"; a lesson goal described an impossible resistor placement.
+- On the web, delete / clear / reset confirmations and file export never worked (Alert is a no-op there).
+
 ## Next steps
 
 1. Launch on a device or emulator (`npx expo start`, then Expo Go or a dev build) and tune touch interactions, especially drag-from-tray (parts are currently added by tapping) and wire endpoint editing.
 2. Profile on a mid-range Android phone; if needed, move the solver into a worklet runtime and/or switch the dense LU to a sparse one.
-3. Optional: an app icon and splash in Bench's style (the scaffold's defaults are still in `assets/images`).
+3. App icon and splash are generated by `tools/make_icons.py`.

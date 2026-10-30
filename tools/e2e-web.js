@@ -1,3 +1,5 @@
+// Usage: npx expo export -p web && node tools/serve-web.js dist   (then, in another shell)
+//        npm i --no-save puppeteer-core && node tools/e2e-web.js   (set CHROME_PATH if Chrome is elsewhere)
 // End-to-end interaction test of the Bench web build (drives the real UI with mouse + keyboard).
 const puppeteer = require('puppeteer-core');
 
@@ -13,7 +15,7 @@ const ROWS = { a: 6, b: 7, c: 8, d: 9, e: 10, f: 13, g: 14, h: 15, i: 16, j: 17 
 const hole = (n) => ({ x: colX(Number(n.slice(1))), y: ROWS[n[0]] });
 
 (async () => {
-  const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: 'new', args: ['--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: 'new', args: ['--no-sandbox'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1400, height: 880 });
   const errors = [];
@@ -98,7 +100,7 @@ const hole = (n) => ({ x: colX(Number(n.slice(1))), y: ROWS[n[0]] });
   check(done, 'lesson auto-check passes after building it');
   const iLed = await store((s, sim) => sim.snapshot && sim.snapshot.parts.d1 && sim.snapshot.parts.d1.i);
   check(iLed > 0.0135 && iLed < 0.0165, `LED current ≈ 15 mA (got ${(iLed * 1000).toFixed(2)} mA)`);
-  await page.screenshot({ path: 'shots/e2e-lesson.png' });
+  await page.screenshot({ path: 'e2e-lesson.png' });
 
   // ------------------------------------------------------------ 2. sandbox: wires, hole taps, wire-end drag, undo
   console.log('Sandbox: wiring');

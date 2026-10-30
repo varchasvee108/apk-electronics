@@ -4,6 +4,8 @@ An offline electronics lab and teacher for phones and tablets (with a browser bu
 
 ![555 blinker running](docs/screenshots/blinker.png)
 
+![A lesson solved in the app](docs/screenshots/lesson-solved.png)
+
 ## Run it
 
 ```bash
@@ -16,7 +18,7 @@ Every native module Bench uses (Skia, Reanimated, Gesture Handler, SQLite, file 
 Quality gates:
 
 ```bash
-npm test               # 127 Jest tests: solver vs analytic answers, AVR, netlists, examples, lessons
+npm test               # 179 Jest tests: solver vs analytic answers, AVR, netlists, examples, every lesson solved by script
 npm run typecheck      # app + sim-core, TypeScript strict
 npx eslint src sim-core/src
 npx expo-doctor
@@ -36,6 +38,7 @@ npx expo-doctor
 - Architecture and the ngspice decision: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Status, test list and every model simplification: [`docs/STATUS.md`](docs/STATUS.md)
 - Screenshots: [`docs/screenshots/`](docs/screenshots)
+- Browser end-to-end test (drives the real UI): [`tools/e2e-web.js`](tools/e2e-web.js)
 
 ## Arduino: how compilation works
 
