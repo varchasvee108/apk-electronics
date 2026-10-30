@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "ignoreDeprecations": "6.0",
+    "lib": ["ES2020"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "types": ["jest", "node"],
+    "paths": { "@sim/*": ["./src/*"] }
+  },
+  "include": ["src/**/*.ts", "__tests__/**/*.ts", "../src/model/**/*.ts"]
+}

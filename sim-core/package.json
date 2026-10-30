@@ -1,0 +1,7 @@
+{
+  "name": "@bench/sim-core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bench circuit simulation core: MNA solver, device models, mixed-signal logic and AVR co-simulation. Pure TypeScript, no React.",
+  "main": "src/index.ts"
+}
