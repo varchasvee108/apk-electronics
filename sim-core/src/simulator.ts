@@ -60,6 +60,8 @@ export class Simulator {
   vntol: number;
   abstol: number;
   hasNonlinear: boolean;
+  /** True when some device carries integrated state (capacitors, inductors, op-amp poles…). */
+  hasReactive: boolean;
   /** Most recent runtime failure (stops the transient). */
   error: Diagnostic | null = null;
   /** Load (fraction of rating) per device id, refreshed every accepted step. */
@@ -99,6 +101,7 @@ export class Simulator {
     this.x = this.s.x;
     this.xNew = new Float64Array(next);
     this.hasNonlinear = this.devices.some((d) => d.nonlinear);
+    this.hasReactive = this.devices.some((d) => d.lte !== undefined || d.type === 'motor');
     this.topology = analyzeTopology(netlist);
     const noGround = this.topology.find((d) => d.code === 'no-ground');
     if (noGround && noGround.node !== undefined) this.autoGround = noGround.node - 1;
@@ -382,8 +385,8 @@ export class Simulator {
     if (disc || landed) {
       this.beSteps = 2;
       this.stepsSinceDisc = 0;
-      this.dtNext = Math.min(this.dtNext, Math.max(this.maxStepEff() * 1e-4, dtMin * 10), disc ? dt : Infinity);
-      if (landed && !disc) this.dtNext = Math.max(this.dtNext, Math.min(dt, this.maxStepEff() * 1e-2));
+      // Restart cautiously only when there is reactive state whose derivative may have jumped.
+      if (this.hasReactive) this.dtNext = Math.min(this.dtNext, Math.max(this.maxStepEff() * 0.02, dtMin * 10));
     } else {
       if (this.beSteps > 0) this.beSteps--;
       this.stepsSinceDisc++;

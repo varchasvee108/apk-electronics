@@ -13,3 +13,8 @@ export type { ChipDef, ChipPin, PinRole } from './digital/chips';
 export { LogicChip } from './digital/logic';
 export { ArduinoUno, UNO_PINS } from './avr/arduino';
 export { parseIntelHex, toIntelHex } from './avr/intelhex';
+export { assemble, M328P_SYMBOLS } from './avr/assembler';
+export type { AsmResult, AsmError } from './avr/assembler';
+export { STARTER_PROGRAMS } from './avr/programs';
+export type { StarterProgram } from './avr/programs';
+export * from './models';
