@@ -14,7 +14,7 @@ import { WIRE_COLORS, type PartInstance } from '@/model/types';
 import { controller } from '@/sim/controller';
 import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
-import { C, R, S, T } from '@/theme';
+import { C, MONO, R, S, T } from '@/theme';
 import { Badge, Button, Card, Chip, KV, SectionTitle, Slider, Toggle, ValueInput } from './ui';
 
 const SOURCE_TYPES = new Set(['battery', 'supply', 'funcgen', 'acsource']);
@@ -412,8 +412,8 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   propLabel: { fontSize: 13, fontWeight: '600', color: C.ink2, marginBottom: 4 },
   why: { marginBottom: S.sm, backgroundColor: C.surface2 },
-  formula: { fontFamily: 'monospace', fontSize: 14, color: C.accentInk, marginTop: 6 },
-  formulaLive: { fontFamily: 'monospace', fontSize: 13, color: C.ink, marginTop: 4, backgroundColor: C.accentSoft, padding: 6, borderRadius: R.sm },
+  formula: { fontFamily: MONO, fontSize: 14, color: C.accentInk, marginTop: 6 },
+  formulaLive: { fontFamily: MONO, fontSize: 13, color: C.ink, marginTop: 4, backgroundColor: C.accentSoft, padding: 6, borderRadius: R.sm },
   loadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   loadTrack: { height: 8, backgroundColor: C.sunken, borderRadius: 4, marginTop: 4, overflow: 'hidden' },
   loadFill: { height: 8 },
@@ -424,6 +424,6 @@ const styles = StyleSheet.create({
   bandsRow: { marginTop: S.md, gap: 6 },
   bandsBody: { flexDirection: 'row', height: 24, width: 150, borderRadius: 12, backgroundColor: '#E9D3A8', paddingHorizontal: 16, gap: 8, alignItems: 'stretch' },
   band: { width: 10 },
-  code: { fontFamily: 'monospace', fontSize: 12, color: C.ink, backgroundColor: C.surface2, borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: C.border },
+  code: { fontFamily: MONO, fontSize: 12, color: C.ink, backgroundColor: C.surface2, borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: C.border },
   codeEdit: { minHeight: 220, textAlignVertical: 'top' },
 });

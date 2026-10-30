@@ -8,7 +8,7 @@ import type { ProbeKind } from '@/model/types';
 import { LA_CHANNELS, SCOPE_CHANNELS, controller, type DmmMode } from '@/sim/controller';
 import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
-import { C, R, S, T } from '@/theme';
+import { C, MONO, R, S, T } from '@/theme';
 import { Button, Card, Chip, KV, SectionTitle, Segmented } from './ui';
 
 export type InstrumentTab = 'meter' | 'scope' | 'logic' | 'bode' | 'serial';
@@ -585,7 +585,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
   lcd: { backgroundColor: '#18241F', borderRadius: R.lg, padding: S.lg, minHeight: 110, justifyContent: 'center' },
   lcdMode: { color: '#7FB7A0', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-  lcdValue: { color: '#C9FBE5', fontSize: 40, fontFamily: 'monospace', fontWeight: '700' },
+  lcdValue: { color: '#C9FBE5', fontSize: 40, fontFamily: MONO, fontWeight: '700' },
   lcdBeep: { color: '#FFD166', fontWeight: '700', marginTop: 4 },
   screen: { borderRadius: R.md, overflow: 'hidden', borderWidth: 1, borderColor: C.border, alignSelf: 'flex-start', marginTop: S.xs },
   screenInfo: { position: 'absolute', right: 6, top: 4, backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 6, borderRadius: 6 },

@@ -1,3 +1,8 @@
+import { Platform } from 'react-native';
+
+/** Monospace family that exists on each platform ('monospace' is Android/web only). */
+export const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' }) as string;
+
 /** Bench uses a single light theme: calm neutrals, one teal accent, semantic status colours. */
 export const C = {
   bg: '#F3F4F6',
@@ -46,7 +51,7 @@ export const T = {
   label: { fontSize: 14, fontWeight: '600' as const, color: C.ink },
   title: { fontSize: 20, fontWeight: '700' as const, color: C.ink },
   hero: { fontSize: 30, fontWeight: '800' as const, color: C.ink, letterSpacing: -0.5 },
-  mono: { fontFamily: 'monospace', fontSize: 13, color: C.ink },
+  mono: { fontFamily: MONO, fontSize: 13, color: C.ink },
 } as const;
 
 /** Minimum touch target (dp). */
