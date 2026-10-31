@@ -29,6 +29,7 @@ function wirePath(a: Pt, b: Pt, arc: boolean) {
 export const WireView = memo(function WireView({
   wire,
   current,
+  acCurrent = 0,
   voltage,
   vmax,
   selected,
@@ -39,6 +40,8 @@ export const WireView = memo(function WireView({
 }: {
   wire: Wire;
   current: number;
+  /** RMS of the alternating part of the current (shown as dots shimmering back and forth). */
+  acCurrent?: number;
   voltage: number | null;
   vmax: number;
   selected: boolean;
@@ -49,8 +52,10 @@ export const WireView = memo(function WireView({
 }) {
   const path = useMemo(() => wirePath(wire.a, wire.b, !schematic), [wire.a, wire.b, schematic]);
   const speed = showFlow ? flowSpeed(current) : 0;
+  // AC: the dots rock back and forth (amplitude grows with the RMS current) instead of drifting
+  const wobble = showFlow && acCurrent > 2e-6 && acCurrent > 1.5 * Math.abs(current) ? Math.min(PERIOD * 0.9, Math.abs(flowSpeed(acCurrent)) * 0.12) : 0;
   const phase = useDerivedValue(() => {
-    const v = -((clock.value * speed) % PERIOD);
+    const v = -((clock.value * speed) % PERIOD) + wobble * Math.sin(clock.value * 2 * Math.PI * 1.2);
     return v;
   });
   const color = showVoltage && voltage !== null ? voltageColor(voltage, vmax) : schematic ? '#1F2328' : wire.color;
@@ -60,7 +65,7 @@ export const WireView = memo(function WireView({
       {!schematic && <Path path={path} style="stroke" strokeWidth={0.36} strokeCap="round" color="rgba(0,0,0,0.28)" />}
       <Path path={path} style="stroke" strokeWidth={schematic ? 0.09 : 0.27} strokeCap="round" color={color} />
       {!schematic && <Path path={path} style="stroke" strokeWidth={0.07} strokeCap="round" color="rgba(255,255,255,0.35)" />}
-      {speed !== 0 && (
+      {(speed !== 0 || wobble > 0) && (
         <Path path={path} style="stroke" strokeWidth={schematic ? 0.16 : 0.15} strokeCap="round" color={schematic ? C.accent : 'rgba(255,255,255,0.95)'}>
           <DashPathEffect intervals={DASH} phase={phase} />
         </Path>

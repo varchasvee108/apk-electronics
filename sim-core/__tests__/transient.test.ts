@@ -200,4 +200,31 @@ describe('transient analysis', () => {
     expect(sim.v('no')).toBeGreaterThan(4.9);
     expect(sim.v('nc')).toBeLessThan(0.01);
   });
+
+  test('editing a running circuit does not glitch stateful parts (hot swap)', () => {
+    const base = () =>
+      new NetlistBuilder()
+        .V('VP', 'vp', '0', 15)
+        .V('VN', 'vn', '0', -15)
+        .V('VIN', 'in', '0', 1)
+        .R('RIN', 'in', 'm', 10e3)
+        .R('RF', 'm', 'out', 47e3)
+        .add('opamp', 'U1', ['0', 'm', 'vp', 'vn', 'out'], LM741)
+        .V('V5', 'v5', '0', 5)
+        .add('relay', 'K1', ['v5', '0', 'v5', 'no', 'nc'], {})
+        .R('RNO', 'no', '0', 1e3);
+    const a = new Simulator(base().build(), { maxStep: 1 / 240 });
+    a.startTransient();
+    a.advance(0.5);
+    expect(a.v('out')).toBeCloseTo(-4.7, 2);
+    expect(a.read('K1').extra?.energized).toBe(true);
+    // add an unrelated part: node numbering shifts, the simulator is rebuilt and adopts the old state
+    const b = new Simulator(base().R('RX', 'x1', '0', 1e3).V('VX', 'x1', '0', 1).build(), { maxStep: 1 / 240 });
+    b.adoptFrom(a);
+    let worst = 0;
+    b.advance(b.t + 0.2, { onStep: (s) => (worst = Math.max(worst, Math.abs(s.v('out') + 4.7))) });
+    expect(worst).toBeLessThan(0.05);
+    expect(b.read('K1').extra?.energized).toBe(true);
+    expect(b.v('no')).toBeGreaterThan(4.9);
+  });
 });

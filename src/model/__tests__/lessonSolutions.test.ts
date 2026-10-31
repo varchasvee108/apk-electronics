@@ -1,5 +1,6 @@
 import { Simulator } from '@sim/simulator';
-import type { Snapshot } from '@/sim/controller';
+import { ReadingAverager } from '@/sim/averager';
+import { buildSnapshot, type Snapshot } from '@/sim/snapshot';
 import { colX, hole } from '../breadboard';
 import { DocBuilder, railNear } from '../build';
 import { astable555 } from '../examples';
@@ -69,31 +70,36 @@ class Bench {
     this.edit((d) => {
       d.probes[kind] = P(at);
     });
+    this.avg = null;
   }
 
-  private snapshot(): Snapshot {
-    const ex = extractNetlist(this.doc);
-    const nodeV = new Float64Array(this.sim.nodeCount);
-    for (let i = 1; i < this.sim.nodeCount; i++) nodeV[i] = this.sim.nodeVoltage(i);
-    const parts: Snapshot['parts'] = {};
-    for (const p of this.doc.parts) {
-      const live: Snapshot['parts'][string] = { v: 0, i: 0, p: 0, extra: {}, load: 0, failed: false, failReason: '', pinV: [], els: {} };
-      (ex.elementsByPart.get(p.id) ?? []).forEach((e, k) => {
-        const rd = this.sim.read(e.id);
-        live.els[e.id === p.id ? '' : e.id.slice(p.id.length + 1)] = rd;
-        if (e.id === p.id || k === 0) {
-          live.v = rd.v;
-          live.i = rd.i;
-          live.extra = rd.extra ?? {};
-        }
-        if (this.sim.device(e.id)?.failed) live.failed = true;
-      });
-      parts[p.id] = live;
+  private avg: ReadingAverager | null = null;
+  private avgSim: Simulator | null = null;
+
+  /** Averager for the current simulator (rebuilt after a hot swap), tracking the meter probes. */
+  private averager(): ReadingAverager {
+    if (!this.avg || this.avgSim !== this.sim) {
+      this.avg = new ReadingAverager(
+        this.sim.devices.map((d) => d.id),
+        this.sim.nodeCount,
+      );
+      this.avgSim = this.sim;
+      const ex = extractNetlist(this.doc);
+      const node = (q?: Pt) => (q ? ex.nodeOf.get(`${q.x},${q.y}`) : undefined);
+      const a = node(this.doc.probes['dmm+']);
+      const b = node(this.doc.probes['dmm-']);
+      this.avg.trackPair(a ?? null, b ?? null);
+      this.avg.sample(this.sim);
     }
-    const dp = this.doc.probes['dmm+'];
-    const dm = this.doc.probes['dmm-'];
-    const nv = (q?: Pt) => (q ? nodeV[ex.nodeOf.get(`${q.x},${q.y}`) ?? 0] : 0);
-    return { t: this.sim.t, nodeV, parts, wireI: {}, vmax: 9, dmm: dp && dm ? { v: nv(dp) - nv(dm), i: 0 } : null };
+    return this.avg;
+  }
+
+  /** What the app would display now (readings averaged since the previous snapshot). */
+  private snapshot(): Snapshot {
+    const avg = this.averager();
+    const snap = buildSnapshot(this.sim, this.doc, extractNetlist(this.doc), avg);
+    avg.reset();
+    return snap;
   }
 
   /** Run for `seconds`, evaluating the checks like the app does (on ~25 Hz snapshots). */
@@ -101,6 +107,7 @@ class Bench {
     const end = this.sim.t + seconds;
     this.sim.advance(end, {
       onStep: (s) => {
+        this.averager().sample(s);
         // scope-style trace of CH1 / CH2 for frequency checks
         for (const k of ['ch1', 'ch2'] as const) {
           const q = this.doc.probes[k];

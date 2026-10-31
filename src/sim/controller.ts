@@ -1,33 +1,16 @@
 import { analyzeTopology } from '@sim/diagnostics';
 import { Simulator, SimulationError } from '@sim/simulator';
-import type { DeviceReading, Diagnostic, ElementSpec, Netlist } from '@sim/types';
-import { extractNetlist, topologyKey, type Extraction } from '@/model/netlist';
-import { holeAt } from '@/model/breadboard';
+import type { Diagnostic, ElementSpec, Netlist } from '@sim/types';
+import { extractNetlist, nodeAt, topologyKey, type Extraction } from '@/model/netlist';
 import { pinPositions } from '@/model/parts';
 import { ptKey, type CircuitDoc, type ProbeKind } from '@/model/types';
+import { ReadingAverager } from './averager';
+import { buildSnapshot, partPinCurrents, wireCurrents } from './snapshot';
+import { resetDamping } from './smooth';
 import { useSim } from './store';
 
-export interface PartLive {
-  v: number;
-  i: number;
-  p: number;
-  extra: Record<string, number | string | boolean>;
-  load: number;
-  failed: boolean;
-  failReason: string;
-  pinV: number[];
-  /** Readings of every element of the part, keyed by suffix ('' = main). */
-  els: Record<string, DeviceReading>;
-}
-
-export interface Snapshot {
-  t: number;
-  nodeV: Float64Array;
-  parts: Record<string, PartLive>;
-  wireI: Record<string, number>;
-  vmax: number;
-  dmm: { v: number; i: number } | null;
-}
+export type { PartLive, Snapshot } from './snapshot';
+export { wireCurrents } from './snapshot';
 
 export const SCOPE_CHANNELS: ProbeKind[] = ['ch1', 'ch2', 'ch3', 'ch4'];
 export const LA_CHANNELS: ProbeKind[] = ['la0', 'la1', 'la2', 'la3', 'la4', 'la5', 'la6', 'la7'];
@@ -59,7 +42,7 @@ export class TraceBuffer {
   }
 }
 
-export type DmmMode = 'V' | 'A' | 'Ω';
+export type DmmMode = 'V' | 'V~' | 'A' | 'Ω';
 
 class SimController {
   doc: CircuitDoc | null = null;
@@ -80,6 +63,11 @@ class SimController {
   trace = new TraceBuffer();
   private probeNodes: Partial<Record<ProbeKind, number>> = {};
   private owner = 0;
+  private avg: ReadingAverager | null = null;
+  private lastAcc = -Infinity;
+  private accCount = 0;
+  private wireSq = new Map<string, number>();
+  private wireN = 0;
 
   /** A workbench screen takes ownership of the simulator while it is mounted. */
   claim(): number {
@@ -122,7 +110,8 @@ class SimController {
   /** Called on every document change. Re-extracts the netlist and updates a running simulation in place. */
   setDoc(doc: CircuitDoc): void {
     this.doc = doc;
-    const { netlist } = this.build(doc);
+    const prevEx = this.ex;
+    const { ex, netlist } = this.build(doc);
     if (!this.running) {
       this.key = '';
       this.publishStatic();
@@ -143,15 +132,27 @@ class SimController {
         }
       }
       if (changed) sim.markDiscontinuity();
+      this.trackMeter();
       this.publish(true);
       return;
     }
     try {
       const next = new Simulator(netlist, { failures: this.failures, maxStep: this.maxStep() });
-      if (sim) next.adoptFrom(sim);
-      else next.startTransient();
+      if (sim) {
+        // match nets by where they physically are, not by their (index-based) names
+        next.adoptFrom(sim, (n) => {
+          for (const p of ex.netPoints[n] ?? []) {
+            const j = prevEx ? nodeAt(prevEx, p) : undefined;
+            if (j !== undefined) return j;
+          }
+          const byName = sim.netlist.nodeNames.indexOf(netlist.nodeNames[n]);
+          return byName > 0 ? byName : undefined;
+        });
+      } else next.startTransient();
       this.sim = next;
       this.key = key;
+      this.applyStepLimits();
+      this.newAverager();
       if (useSim.getState().status === 'error') useSim.setState({ status: 'running', error: null });
     } catch (e) {
       this.fail(e);
@@ -167,11 +168,18 @@ class SimController {
   /** Scope / logic analyzer mounted: sample finely. Returns the matching release function. */
   attachViewer(): () => void {
     this.viewers++;
-    if (this.sim) this.sim.maxStep = this.maxStep();
+    this.applyStepLimits();
     return () => {
       this.viewers--;
-      if (this.sim) this.sim.maxStep = this.maxStep();
+      this.applyStepLimits();
     };
+  }
+
+  /** Fine steps while a scope or logic analyzer is showing; coarser (still accurate) steps for meters. */
+  private applyStepLimits(): void {
+    if (!this.sim) return;
+    this.sim.maxStep = this.maxStep();
+    this.sim.wavePoints = this.viewers > 0 ? 50 : 20;
   }
 
   // ------------------------------------------------------------------ run control
@@ -187,6 +195,8 @@ class SimController {
       this.sim = new Simulator(netlist, { failures: this.failures, maxStep: this.maxStep() });
       this.sim.startTransient();
       this.key = topologyKey(netlist);
+      this.applyStepLimits();
+      this.newAverager();
       useSim.setState({ status: 'running', error: null });
     } catch (e) {
       this.sim = null;
@@ -204,6 +214,7 @@ class SimController {
     this.sim = null;
     this.key = '';
     useSim.setState({ status: 'off', snapshot: null, error: null, simTime: 0, speed: 0 });
+    resetDamping();
     this.publishStatic();
   }
 
@@ -225,6 +236,7 @@ class SimController {
     try {
       sim.step();
       this.sample(sim, true);
+      this.accumulate(sim, true);
     } catch (e) {
       this.fail(e);
     }
@@ -236,7 +248,7 @@ class SimController {
     const sim = this.sim;
     if (!sim) return;
     try {
-      sim.advance(sim.t + this.timePerDiv, { budgetMs: 500, onStep: (s) => this.sample(s) });
+      sim.advance(sim.t + this.timePerDiv, { budgetMs: 500, onStep: (s) => (this.sample(s), this.accumulate(s)) });
     } catch (e) {
       this.fail(e);
     }
@@ -245,13 +257,13 @@ class SimController {
 
   setTimeScale(s: number): void {
     this.timeScale = s;
-    if (this.sim) this.sim.maxStep = this.maxStep();
+    this.applyStepLimits();
     useSim.setState({ timeScale: s });
   }
 
   setTimePerDiv(t: number): void {
     this.timePerDiv = t;
-    if (this.sim) this.sim.maxStep = this.maxStep();
+    this.applyStepLimits();
   }
 
   setDmmMode(m: DmmMode): void {
@@ -290,7 +302,7 @@ class SimController {
     if (!sim || st !== 'running') return;
     const t0 = sim.t;
     try {
-      sim.advance(t0 + wall * this.timeScale, { budgetMs: 10, onStep: (s) => this.sample(s) });
+      sim.advance(t0 + wall * this.timeScale, { budgetMs: 10, onStep: (s) => (this.sample(s), this.accumulate(s)) });
     } catch (e) {
       this.fail(e);
     }
@@ -308,6 +320,43 @@ class SimController {
       if (n !== undefined) vals[k] = sim.nodeVoltage(n);
     }
     this.trace.push(sim.t, vals);
+  }
+
+  private newAverager(): void {
+    const sim = this.sim;
+    if (!sim) return;
+    this.avg = new ReadingAverager(
+      sim.devices.map((d) => d.id),
+      sim.nodeCount,
+    );
+    this.trackMeter();
+    this.avg.sample(sim);
+    this.lastAcc = sim.t;
+    this.wireSq.clear();
+    this.wireN = 0;
+  }
+
+  private trackMeter(): void {
+    const p = this.probeNodes['dmm+'];
+    const m = this.probeNodes['dmm-'];
+    this.avg?.trackPair(p ?? null, m ?? null);
+  }
+
+  /** Feed the display averager (about 40 sub-samples per frame, whatever the solver's step count). */
+  private accumulate(sim: Simulator, force = false): void {
+    const avg = this.avg;
+    if (!avg) return;
+    // Every accepted step is integrated: sub-sampling steps can lock onto a periodic signal's phase
+    // (PWM sampled once per period always reads the same level) and bias the averages.
+    void force;
+    this.lastAcc = sim.t;
+    const latest = avg.sample(sim);
+    // every few steps, record each wire's instantaneous current for its AC (RMS) amplitude
+    if (++this.accCount % 7 === 0 && this.doc && this.ex) {
+      const wi = wireCurrents(this.doc, this.ex, partPinCurrents(this.doc, this.ex, (id) => latest.get(id) ?? null));
+      for (const [id, val] of Object.entries(wi)) this.wireSq.set(id, (this.wireSq.get(id) ?? 0) + val * val);
+      this.wireN++;
+    }
   }
 
   // ------------------------------------------------------------------ snapshots
@@ -330,53 +379,15 @@ class SimController {
     const doc = this.doc;
     this.lastPublish = performanceNow();
     if (!sim || !ex || !doc) return;
-    const nodeV = new Float64Array(sim.nodeCount);
-    let vmax = 1;
-    for (let i = 1; i < sim.nodeCount; i++) {
-      nodeV[i] = sim.nodeVoltage(i);
-      vmax = Math.max(vmax, Math.abs(nodeV[i]));
-    }
-    const parts: Record<string, PartLive> = {};
-    const pinCurrents = new Map<string, number[]>();
-    for (const part of doc.parts) {
-      const els = ex.elementsByPart.get(part.id) ?? [];
-      const pins = ex.partPins.get(part.id) ?? [];
-      const live: PartLive = { v: 0, i: 0, p: 0, extra: {}, load: 0, failed: false, failReason: '', pinV: pins.map((n) => nodeV[n] ?? 0), els: {} };
-      const pc = new Array(pins.length).fill(0);
-      els.forEach((e, k) => {
-        const dev = sim.device(e.id);
-        if (!dev) return;
-        const rd = dev.read(sim.x);
-        const suffix = e.id === part.id ? '' : e.id.slice(part.id.length + 1);
-        live.els[suffix] = rd;
-        if (e.id === part.id || k === 0) {
-          live.v = rd.v;
-          live.i = rd.i;
-          live.extra = rd.extra ?? {};
-        }
-        // dissipated power for loads; sources report negative power (energy delivered)
-        live.p += rd.p;
-        live.load = Math.max(live.load, sim.load.get(e.id) ?? 0);
-        if (dev.failed) {
-          live.failed = true;
-          live.failReason = dev.failReason;
-        }
-        rd.pinI?.forEach((cur, j) => {
-          const pinIdx = pins.indexOf(e.nodes[j]);
-          if (pinIdx >= 0) pc[pinIdx] += cur;
-        });
-      });
-      pinCurrents.set(part.id, pc);
-      parts[part.id] = live;
-    }
-    let dmm: Snapshot['dmm'] = null;
-    const nP = this.probeNodes['dmm+'];
-    const nM = this.probeNodes['dmm-'];
-    if (nP !== undefined && nM !== undefined) {
-      const meter = sim.device('__dmm');
-      dmm = { v: nodeV[nP] - nodeV[nM], i: meter ? meter.read(sim.x).pinI?.[0] ?? 0 : 0 };
-    }
-    const snapshot: Snapshot = { t: sim.t, nodeV, parts, wireI: wireCurrents(doc, ex, pinCurrents), vmax, dmm };
+    if (!this.avg) this.newAverager();
+    const avg = this.avg as ReadingAverager;
+    if (avg.weight <= 0) avg.sample(sim);
+    const wireAc: Record<string, number> = {};
+    if (this.wireN > 0) for (const [id, sq] of this.wireSq) wireAc[id] = Math.sqrt(sq / this.wireN);
+    const snapshot = buildSnapshot(sim, doc, ex, avg, wireAc);
+    avg.reset();
+    this.wireSq.clear();
+    this.wireN = 0;
     const diagnostics = [...sim.topology, ...sim.liveDiagnostics()];
     useSim.setState({ snapshot, diagnostics, simTime: sim.t, speed: this.speedEma, traceVersion: this.trace.version + sim.steps });
     void force;
@@ -460,68 +471,6 @@ class SimController {
 
 function performanceNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
-}
-
-/**
- * Current along each wire. Each net is a tree of zero-ohm connections (wires and breadboard strips);
- * pins draw current out of it. A spanning tree per net gives each wire the current needed by the
- * pins on its far side (redundant wires in loops are shown carrying nothing).
- */
-export function wireCurrents(doc: CircuitDoc, ex: Extraction, pinCurrents: Map<string, number[]>): Record<string, number> {
-  const demand = new Map<string, number>();
-  const adj = new Map<string, { to: string; wire?: string; forward: boolean }[]>();
-  const link = (a: string, b: string, wire?: string) => {
-    (adj.get(a) ?? adj.set(a, []).get(a))?.push({ to: b, wire, forward: true });
-    (adj.get(b) ?? adj.set(b, []).get(b))?.push({ to: a, wire, forward: false });
-  };
-  for (const part of doc.parts) {
-    const pc = pinCurrents.get(part.id);
-    if (!pc) continue;
-    pinPositions(part).forEach((p, k) => {
-      const key = ptKey(p);
-      demand.set(key, (demand.get(key) ?? 0) + (pc[k] ?? 0));
-    });
-  }
-  for (const w of doc.wires) link(ptKey(w.a), ptKey(w.b), w.id);
-  if (doc.board === 'breadboard') {
-    for (const k of ex.nodeOf.keys()) {
-      const [x, y] = k.split(',').map(Number);
-      const h = holeAt({ x, y });
-      if (h) link(`#${h.group}`, k);
-    }
-  }
-  const out: Record<string, number> = {};
-  const visited = new Set<string>();
-  for (const start of adj.keys()) {
-    if (visited.has(start)) continue;
-    // iterative DFS producing a parent order
-    const order: string[] = [];
-    const parentEdge = new Map<string, { from: string; wire?: string; forward: boolean }>();
-    const stack = [start];
-    visited.add(start);
-    while (stack.length) {
-      const u = stack.pop() as string;
-      order.push(u);
-      for (const e of adj.get(u) ?? []) {
-        if (visited.has(e.to)) continue;
-        visited.add(e.to);
-        parentEdge.set(e.to, { from: u, wire: e.wire, forward: e.forward });
-        stack.push(e.to);
-      }
-    }
-    const sub = new Map<string, number>();
-    for (let i = order.length - 1; i >= 0; i--) {
-      const u = order[i];
-      const total = (sub.get(u) ?? 0) + (demand.get(u) ?? 0);
-      const pe = parentEdge.get(u);
-      if (pe) {
-        sub.set(pe.from, (sub.get(pe.from) ?? 0) + total);
-        // current flows parent → child equal to the child's subtree demand
-        if (pe.wire) out[pe.wire] = pe.forward ? total : -total;
-      }
-    }
-  }
-  return out;
 }
 
 export const controller = new SimController();

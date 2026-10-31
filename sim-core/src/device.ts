@@ -95,8 +95,8 @@ export abstract class Device {
   crossing?(xOld: Float64Array, xNew: Float64Array): number;
   /** Next time > t at which a source waveform has a corner. */
   nextBreakpoint?(t: number): number;
-  /** Largest step the device tolerates (e.g. period / 40 for a sine). */
-  maxStep?(): number;
+  /** Largest step the device tolerates; sources resolve each cycle into `pointsPerPeriod` steps. */
+  maxStep?(pointsPerPeriod?: number): number;
   /** Ask the device how far it may advance (used by the AVR co-simulation). Returns allowed dt. */
   preStep?(t: number, dt: number): number;
   /** Local truncation error ratio (err / tol) for the proposed solution; ≤ 1 is acceptable. */

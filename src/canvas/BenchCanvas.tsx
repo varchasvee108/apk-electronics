@@ -17,7 +17,8 @@ import { allHoles, holeAt } from '@/model/breadboard';
 import { nodeAt } from '@/model/netlist';
 import { partBounds, partLabel, pinPositions } from '@/model/parts';
 import { ptKey, type Pt } from '@/model/types';
-import { controller } from '@/sim/controller';
+import { controller, type Snapshot } from '@/sim/controller';
+import { damp } from '@/sim/smooth';
 import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
 import { C } from '@/theme';
@@ -473,6 +474,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
                     key={w.id}
                     wire={w}
                     current={snapshot?.wireI[w.id] ?? 0}
+                    acCurrent={snapshot?.wireAc[w.id] ?? 0}
                     voltage={vOf(w.a)}
                     vmax={snapshot?.vmax ?? 1}
                     selected={selection.wires.includes(w.id)}
@@ -511,7 +513,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
                 <Bubble
                   x={focusPts[0].x + 0.6}
                   y={focusPts[0].y - 0.8}
-                  lines={[controller.nodeName(focusNet), snapshot ? formatEng(snapshot.nodeV[focusNet] ?? 0, 'V') : 'power on to measure']}
+                  lines={[controller.nodeName(focusNet), snapshot ? netText(snapshot, focusNet) : 'power on to measure']}
                 />
               )}
               {snapshot &&
@@ -520,7 +522,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
                     const n = Number(id.slice(4));
                     const pt = ex?.netPoints[n]?.[0];
                     if (!pt) return null;
-                    return <Bubble key={id} x={pt.x + 0.6} y={pt.y - 0.8} lines={[controller.nodeName(n), formatEng(snapshot.nodeV[n] ?? 0, 'V')]} pinned />;
+                    return <Bubble key={id} x={pt.x + 0.6} y={pt.y - 0.8} lines={[controller.nodeName(n), netText(snapshot, n)]} pinned />;
                   }
                   const part = doc.parts.find((q) => q.id === id);
                   const live = snapshot.parts[id];
@@ -532,7 +534,12 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
                       x={b.x1 + 0.3}
                       y={b.y0}
                       pinned
-                      lines={[partLabel(part, doc.parts), `V ${formatEng(live.v, 'V')}`, `I ${formatEng(live.i, 'A')}`, `P ${formatEng(live.p, 'W')}`]}
+                      lines={[
+                        partLabel(part, doc.parts),
+                        `V ${formatEng(damp(`${id}.v`, live.v), 'V')}${live.ac ? ` (${formatEng(damp(`${id}.vrms`, live.vrms), 'V')} rms)` : ''}`,
+                        `I ${formatEng(damp(`${id}.i`, live.i), 'A')}`,
+                        `P ${formatEng(damp(`${id}.p`, live.p), 'W')}`,
+                      ]}
                     />
                   );
                 })}
@@ -542,6 +549,15 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
       </GestureDetector>
     </View>
   );
+}
+
+/** Net readout: damped average, plus the swing when the net carries a changing signal. */
+function netText(snapshot: Snapshot, n: number): string {
+  const mean = damp(`net${n}`, snapshot.nodeV[n] ?? 0);
+  const pp = (snapshot.nodeMax[n] ?? 0) - (snapshot.nodeMin[n] ?? 0);
+  return pp > 0.02 * Math.max(Math.abs(snapshot.nodeMax[n] ?? 0), Math.abs(snapshot.nodeMin[n] ?? 0)) + 1e-3
+    ? `${formatEng(mean, 'V')} avg · ${formatEng(damp(`net${n}pp`, pp), 'V')} p-p`
+    : formatEng(mean, 'V');
 }
 
 function voltageInk(v: number, vmax: number): string {

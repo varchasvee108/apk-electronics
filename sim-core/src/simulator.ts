@@ -48,6 +48,7 @@ export class Simulator {
   readonly s: Stamper;
   readonly topology: Diagnostic[];
   private xNew: Float64Array;
+  private xOldBuf: Float64Array;
   x: Float64Array;
   t = 0;
   hist: History = { times: [0] };
@@ -68,6 +69,8 @@ export class Simulator {
   load = new Map<string, number>();
   /** Total accepted steps. */
   steps = 0;
+  /** Steps per cycle of a periodic source (50 for accurate traces; fewer is fine for meters). */
+  wavePoints = 50;
   private autoGround: number | null = null;
 
   constructor(netlist: Netlist, opts: SimOptions = {}) {
@@ -100,6 +103,7 @@ export class Simulator {
     this.s = new Stamper(next);
     this.x = this.s.x;
     this.xNew = new Float64Array(next);
+    this.xOldBuf = new Float64Array(next);
     this.hasNonlinear = this.devices.some((d) => d.nonlinear);
     this.hasReactive = this.devices.some((d) => d.lte !== undefined || d.type === 'motor');
     this.topology = analyzeTopology(netlist);
@@ -135,7 +139,7 @@ export class Simulator {
   private maxStepEff(): number {
     let m = this.maxStep;
     for (const d of this.devices) {
-      if (d.maxStep) m = Math.min(m, d.maxStep());
+      if (d.maxStep) m = Math.min(m, d.maxStep(this.wavePoints));
     }
     return m;
   }
@@ -291,13 +295,19 @@ export class Simulator {
       dt = bp - this.t;
       landed = true;
     }
+    // A step shortened only to land on the caller's time limit (a display frame) must not shrink the
+    // following steps, otherwise every frame boundary restarts the step size from scratch.
+    const proposed = dt;
+    let clipped = false;
     if (limit - this.t < dt) {
       dt = limit - this.t;
       landed = false;
+      clipped = true;
     }
     dt = Math.max(dt, dtMin);
     for (const d of this.devices) if (d.preStep) dt = Math.max(dtMin, Math.min(dt, d.preStep(this.t, dt)));
-    const xOld = Float64Array.from(s.x);
+    const xOld = this.xOldBuf;
+    xOld.set(s.x);
     let rejected = 0;
     let iterations = 0;
     let ratio = 0;
@@ -381,6 +391,7 @@ export class Simulator {
     const order = method === 'trap' ? 3 : 2;
     const grow = ratio > 0 ? Math.min(2, Math.max(0.3, 0.9 * Math.pow(ratio, -1 / order))) : 2;
     this.dtNext = Math.min(dt * grow, this.maxStepEff());
+    if (clipped && rejected === 0) this.dtNext = Math.min(Math.max(this.dtNext, proposed), this.maxStepEff());
     if (this.updateStress(dt)) disc = true;
     if (disc || landed) {
       this.beSteps = 2;
@@ -442,7 +453,9 @@ export class Simulator {
       if (r.maxI) load = Math.max(load, Math.abs(rd.i) / r.maxI);
       if (r.maxV) load = Math.max(load, Math.abs(rd.v) / r.maxV);
       if (r.maxReverse && rd.v < 0) load = Math.max(load, -rd.v / r.maxReverse);
-      this.load.set(d.id, load);
+      // what the UI shows: smoothed over ~50 ms so AC / switching loads don't flash warnings each cycle
+      const prevSmooth = this.load.get(d.id) ?? load;
+      this.load.set(d.id, prevSmooth + (load - prevSmooth) * Math.min(1, dt / 0.05));
       if (r.tau) d.heat += (load - d.heat) * Math.min(1, dt / r.tau);
       if (!this.failures) continue;
       const instant = r.instantFail !== undefined && load > r.instantFail;
@@ -545,22 +558,32 @@ export class Simulator {
     return m;
   }
 
-  /** Continue from another simulator's state after the netlist changed. */
-  adoptFrom(prev: Simulator): void {
+  /**
+   * Continue from another simulator's state after the netlist changed. `nodeMap` maps a node of this
+   * netlist to the matching node of the previous one (by physical identity); without it, nodes are
+   * matched by name.
+   */
+  adoptFrom(prev: Simulator, nodeMap?: (node: number) => number | undefined): void {
     const states = prev.saveStates();
     this.startTransient();
-    // carry node voltages by name for a good first guess
+    const x = this.s.x;
     for (let i = 1; i < this.nodeCount; i++) {
-      const j = prev.netlist.nodeNames.indexOf(this.netlist.nodeNames[i]);
-      if (j > 0) this.s.x[i - 1] = prev.s.x[j - 1];
+      const j = nodeMap ? nodeMap(i) : prev.netlist.nodeNames.indexOf(this.netlist.nodeNames[i]);
+      if (j !== undefined && j > 0 && j < prev.nodeCount) x[i - 1] = prev.s.x[j - 1];
     }
     for (const d of this.devices) {
+      const old = prev.device(d.id);
+      if (!old) continue;
+      // internal nodes and branch currents belong to the device: carry them over too
+      if (d.internal > 0 && old.internal === d.internal) for (let k = 0; k < d.internal; k++) x[d.intBase + k] = prev.s.x[old.intBase + k];
+      if (d.branches > 0 && old.branches === d.branches) for (let k = 0; k < d.branches; k++) x[d.br0 + k] = prev.s.x[old.br0 + k];
       const st = states.get(d.id);
       if (st !== undefined) d.loadState(st);
     }
     this.t = prev.t;
     this.hist = { times: [prev.t] };
     this.maxStep = prev.maxStep;
+    this.wavePoints = prev.wavePoints;
     this.failures = prev.failures;
     this.markDiscontinuity();
   }

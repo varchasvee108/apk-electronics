@@ -1,32 +1,20 @@
 import { Simulator } from '@sim/simulator';
-import type { Snapshot } from '@/sim/controller';
+import { ReadingAverager } from '@/sim/averager';
+import { buildSnapshot, type Snapshot } from '@/sim/snapshot';
 import { CHALLENGES, LESSONS, sandboxDoc } from '../lessons';
 import { evaluate, newMemory, remember, type CheckContext } from '../lessonCheck';
 import { extractNetlist } from '../netlist';
 import type { CircuitDoc } from '../types';
 
-/** Minimal snapshot builder (the app's controller does the same with more detail). */
+/** The app's own snapshot path: averaged readings over the last frame. */
 function snapshotOf(doc: CircuitDoc, s: Simulator): Snapshot {
   const ex = extractNetlist(doc);
-  const nodeV = new Float64Array(s.nodeCount);
-  for (let i = 1; i < s.nodeCount; i++) nodeV[i] = s.nodeVoltage(i);
-  const parts: Snapshot['parts'] = {};
-  for (const p of doc.parts) {
-    const els = ex.elementsByPart.get(p.id) ?? [];
-    const live: Snapshot['parts'][string] = { v: 0, i: 0, p: 0, extra: {}, load: 0, failed: false, failReason: '', pinV: [], els: {} };
-    els.forEach((e, k) => {
-      const rd = s.read(e.id);
-      live.els[e.id === p.id ? '' : e.id.slice(p.id.length + 1)] = rd;
-      if (e.id === p.id || k === 0) {
-        live.v = rd.v;
-        live.i = rd.i;
-        live.extra = rd.extra ?? {};
-      }
-      if (s.device(e.id)?.failed) live.failed = true;
-    });
-    parts[p.id] = live;
-  }
-  return { t: s.t, nodeV, parts, wireI: {}, vmax: 9, dmm: null };
+  const avg = new ReadingAverager(
+    s.devices.map((d) => d.id),
+    s.nodeCount,
+  );
+  avg.sample(s);
+  return buildSnapshot(s, doc, ex, avg);
 }
 
 describe('lessons', () => {

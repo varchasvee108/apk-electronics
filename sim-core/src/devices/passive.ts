@@ -100,14 +100,16 @@ export class Capacitor extends Device {
     };
   }
   saveState(): unknown {
-    return { ...(super.saveState() as object), vPrev: this.vPrev };
+    return { ...(super.saveState() as object), vPrev: this.vPrev, iPrev: this.iPrev };
   }
   loadState(s: unknown): void {
     super.loadState(s);
-    const st = s as { vPrev?: number };
+    const st = s as { vPrev?: number; iPrev?: number };
     if (st && typeof st.vPrev === 'number') {
       this.params.ic = st.vPrev;
       this.vPrev = st.vPrev;
+      this.iPrev = st.iPrev ?? 0;
+      this.hist.reset(st.vPrev);
     }
   }
 }
@@ -251,6 +253,20 @@ export class Transformer extends Device {
   }
   lte(x: Float64Array, t: number, _dt: number, hist: History, method: Method): number {
     return this.h1.lteRatio(x[this.br0], t, hist, method, 1e-3, 1e-7);
+  }
+  saveState(): unknown {
+    return { ...(super.saveState() as object), i1p: this.i1p, i2p: this.i2p, v1p: this.v1p, v2p: this.v2p };
+  }
+  loadState(s: unknown): void {
+    super.loadState(s);
+    const st = s as { i1p?: number; i2p?: number; v1p?: number; v2p?: number };
+    if (typeof st?.i1p === 'number') {
+      this.i1p = st.i1p;
+      this.i2p = st.i2p ?? 0;
+      this.v1p = st.v1p ?? 0;
+      this.v2p = st.v2p ?? 0;
+      this.h1.reset(this.i1p);
+    }
   }
   read(x: Float64Array): DeviceReading {
     const v1 = this.pv(x, 0) - this.pv(x, 1);

@@ -8,6 +8,7 @@ import { BAND_NAMES, BAND_COLORS, formatEng, resistorBands } from '@sim/units';
 import { notify } from '@/lib/dialog';
 import { pickTextFile } from '@/lib/share';
 import { explain } from '@/model/formulas';
+import { damp } from '@/sim/smooth';
 import { nodeAt } from '@/model/netlist';
 import { partDef, partLabel, type PropSpec } from '@/model/parts';
 import { WIRE_COLORS, type PartInstance } from '@/model/types';
@@ -143,13 +144,34 @@ function PartInspector({ part }: { part: PartInstance }) {
             </>
           ) : (
             <>
-              <KV k="Voltage" v={formatEng(live.v, 'V')} />
-              <KV k="Current" v={formatEng(live.i, 'A')} />
-              {SOURCE_TYPES.has(part.type) ? <KV k="Power delivered" v={formatEng(Math.max(0, -live.p), 'W')} /> : <KV k="Power" v={formatEng(live.p, 'W')} />}
+              {live.ac ? (
+                <>
+                  <KV k="Voltage (average)" v={formatEng(damp(`${part.id}.v`, live.v), 'V')} />
+                  <KV k="Voltage (RMS)" v={formatEng(damp(`${part.id}.vrms`, live.vrms), 'V')} />
+                  <KV k="Voltage (peak-to-peak)" v={formatEng(damp(`${part.id}.vpp`, live.vpp), 'V')} />
+                  <KV k="Current (average)" v={formatEng(damp(`${part.id}.i`, live.i), 'A')} />
+                  <KV k="Current (RMS)" v={formatEng(damp(`${part.id}.irms`, live.irms), 'A')} />
+                </>
+              ) : (
+                <>
+                  <KV k="Voltage" v={formatEng(damp(`${part.id}.v`, live.v), 'V')} />
+                  <KV k="Current" v={formatEng(damp(`${part.id}.i`, live.i), 'A')} />
+                </>
+              )}
+              {SOURCE_TYPES.has(part.type) ? (
+                <KV k="Power delivered" v={formatEng(Math.max(0, -damp(`${part.id}.p`, live.p)), 'W')} />
+              ) : (
+                <KV k="Power" v={formatEng(damp(`${part.id}.p`, live.p), 'W')} />
+              )}
+              {live.ac && <Text style={[T.caption, { marginTop: 4 }]}>This part sees a changing signal: values are averaged like a meter; open the Scope to see the waveform.</Text>}
               {Object.entries(live.extra)
                 .filter(([k]) => ['mode', 'region', 'rpm', 'out', 'energized', 'brightness'].includes(k))
                 .map(([k, v]) => (
-                  <KV key={k} k={k[0].toUpperCase() + k.slice(1)} v={typeof v === 'number' ? (k === 'brightness' ? `${Math.round(Math.min(1, v) * 100)} %` : v.toFixed(0)) : String(v)} />
+                  <KV
+                    key={k}
+                    k={k[0].toUpperCase() + k.slice(1)}
+                    v={typeof v === 'number' ? (k === 'brightness' ? `${Math.round(Math.min(1, damp(`${part.id}.b`, v)) * 100)} %` : damp(`${part.id}.${k}`, v).toFixed(0)) : String(v)}
+                  />
                 ))}
               <LoadBar load={live.load} />
             </>

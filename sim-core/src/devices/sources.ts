@@ -36,8 +36,8 @@ export class VSource extends Device {
   nextBreakpoint(t: number): number {
     return waveNextBreakpoint(this.wave, t);
   }
-  maxStep(): number {
-    return waveMaxStep(this.wave);
+  maxStep(pointsPerPeriod?: number): number {
+    return waveMaxStep(this.wave, pointsPerPeriod);
   }
   acValue(): number {
     return this.num('acmag', 0);
@@ -70,8 +70,8 @@ export class ISource extends Device {
   nextBreakpoint(t: number): number {
     return waveNextBreakpoint(this.wave, t);
   }
-  maxStep(): number {
-    return waveMaxStep(this.wave);
+  maxStep(pointsPerPeriod?: number): number {
+    return waveMaxStep(this.wave, pointsPerPeriod);
   }
   acValue(): number {
     return this.num('acmag', 0);

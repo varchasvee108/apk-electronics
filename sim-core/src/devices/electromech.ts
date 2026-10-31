@@ -86,7 +86,17 @@ export class Relay extends Device {
     return { v, i, p: v * i, pinI: [i, -i, 0, 0, 0], extra: { energized: this.energized } };
   }
   saveState(): unknown {
-    return { ...(super.saveState() as object), energized: this.energized };
+    return { ...(super.saveState() as object), energized: this.energized, iPrev: this.iPrev, vPrev: this.vPrev };
+  }
+  loadState(s: unknown): void {
+    super.loadState(s);
+    const st = s as { energized?: boolean; iPrev?: number; vPrev?: number };
+    if (typeof st?.energized === 'boolean') this.energized = st.energized;
+    if (typeof st?.iPrev === 'number') {
+      this.iPrev = st.iPrev;
+      this.vPrev = st.vPrev ?? 0;
+      this.hist.reset(st.iPrev);
+    }
   }
 }
 

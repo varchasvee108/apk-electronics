@@ -6,6 +6,7 @@ import { formatEng } from '@sim/units';
 import { partLabel } from '@/model/parts';
 import type { ProbeKind } from '@/model/types';
 import { LA_CHANNELS, SCOPE_CHANNELS, controller, type DmmMode } from '@/sim/controller';
+import { damp } from '@/sim/smooth';
 import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
 import { C, MONO, R, S, T } from '@/theme';
@@ -79,11 +80,17 @@ function Multimeter() {
       sub = ohms.note ?? (continuity ? 'Continuity: connected' : '');
     }
   } else if (status === 'off') sub = 'Power on to measure.';
-  else if (dmm) display = mode === 'V' ? formatEng(dmm.v, 'V', 4) : formatEng(dmm.i, 'A', 4);
+  else if (dmm) {
+    if (mode === 'V') display = formatEng(damp('dmm.v', dmm.v), 'V', 4);
+    else if (mode === 'V~') display = formatEng(damp('dmm.vac', dmm.vac), 'V', 4);
+    else display = formatEng(damp('dmm.i', dmm.i), 'A', 4);
+    if (mode === 'V' && dmm.vac > 0.01 + 0.002 * Math.abs(dmm.v)) sub = `Also an AC part: ${formatEng(dmm.vac, 'V')} RMS, ${formatEng(dmm.vpp, 'V')} peak-to-peak. Switch to AC volts to read it.`;
+    if (mode === 'A' && dmm.iac > 1e-5 + 0.002 * Math.abs(dmm.i)) sub = `Also an AC part: ${formatEng(dmm.iac, 'A')} RMS.`;
+  }
   return (
     <>
       <View style={styles.lcd} accessible accessibilityLabel={`Multimeter reading ${display}`}>
-        <Text style={styles.lcdMode}>{mode === 'V' ? 'DC VOLTS' : mode === 'A' ? 'DC AMPS' : 'OHMS'}</Text>
+        <Text style={styles.lcdMode}>{mode === 'V' ? 'DC VOLTS' : mode === 'V~' ? 'AC VOLTS (RMS)' : mode === 'A' ? 'DC AMPS' : 'OHMS'}</Text>
         <Text style={styles.lcdValue}>{display}</Text>
         {continuity && <Text style={styles.lcdBeep}>◉ BEEP</Text>}
       </View>
@@ -91,9 +98,10 @@ function Multimeter() {
       <SectionTitle>Mode</SectionTitle>
       <Segmented<DmmMode>
         options={[
-          { value: 'V', label: 'Volts' },
+          { value: 'V', label: 'V ⎓' },
+          { value: 'V~', label: 'V ~' },
           { value: 'A', label: 'Amps' },
-          { value: 'Ω', label: 'Ohms / continuity' },
+          { value: 'Ω', label: 'Ohms / beep' },
         ]}
         value={mode}
         onChange={(m) => controller.setDmmMode(m)}

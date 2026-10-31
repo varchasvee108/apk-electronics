@@ -155,7 +155,16 @@ export class OpAmp extends Device {
     return { maxI: this.num('maxI', 0.03) };
   }
   saveState(): unknown {
-    return { ...(super.saveState() as object), vPrev: this.vPrev };
+    return { ...(super.saveState() as object), vPrev: this.vPrev, iPrev: this.iPrev };
+  }
+  loadState(s: unknown): void {
+    super.loadState(s);
+    const st = s as { vPrev?: number; iPrev?: number };
+    if (typeof st?.vPrev === 'number') {
+      this.vPrev = st.vPrev;
+      this.iPrev = st.iPrev ?? 0;
+      this.hist.reset(st.vPrev);
+    }
   }
 }
 

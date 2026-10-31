@@ -87,10 +87,11 @@ export function waveNextBreakpoint(w: Waveform, t: number): number {
   return best;
 }
 
-export function waveMaxStep(w: Waveform): number {
+export function waveMaxStep(w: Waveform, pointsPerPeriod = 50): number {
   if (w.kind === 'dc' || w.frequency <= 0) return Infinity;
   const period = 1 / w.frequency;
-  return w.kind === 'sine' ? period / 50 : period / 20;
+  // piecewise-linear waves only need their corners (breakpoints) plus a few points per segment
+  return w.kind === 'sine' ? period / pointsPerPeriod : period / Math.max(8, pointsPerPeriod * 0.4);
 }
 
 export function defaultWave(partial: Partial<Waveform>): Waveform {
