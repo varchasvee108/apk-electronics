@@ -2,6 +2,7 @@ import { ArduinoUno } from './avr/arduino';
 import type { Device } from './device';
 import { OpAmp, Regulator, Timer555 } from './devices/analog-ic';
 import { DCMotor, Relay } from './devices/electromech';
+import { Fuse, Lamp, Servo } from './devices/extra';
 import { Capacitor, Inductor, Resistor, Switch, Transformer } from './devices/passive';
 import { BJT, Diode, MOSFET } from './devices/semis';
 import { ISource, Supply, VSource } from './devices/sources';
@@ -10,7 +11,7 @@ import type { ElementSpec } from './types';
 
 /**
  * Element types:
- *  R C L xfmr sw V I supply D Q M opamp reg 555 relay motor logic avr
+ *  R C L xfmr sw V I supply D Q M opamp reg 555 relay motor logic avr fuse lamp servo
  */
 export function createDevice(spec: ElementSpec): Device {
   switch (spec.type) {
@@ -50,6 +51,12 @@ export function createDevice(spec: ElementSpec): Device {
       return new LogicChip(spec);
     case 'avr':
       return new ArduinoUno(spec);
+    case 'fuse':
+      return new Fuse(spec);
+    case 'lamp':
+      return new Lamp(spec);
+    case 'servo':
+      return new Servo(spec);
     default:
       throw new Error(`Unknown element type "${spec.type}"`);
   }

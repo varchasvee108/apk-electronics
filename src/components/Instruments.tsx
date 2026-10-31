@@ -7,12 +7,13 @@ import { partLabel } from '@/model/parts';
 import type { ProbeKind } from '@/model/types';
 import { LA_CHANNELS, SCOPE_CHANNELS, controller, type DmmMode } from '@/sim/controller';
 import { damp } from '@/sim/smooth';
+import { canTrace, traceCurves, type TraceResult } from '@/sim/curveTracer';
 import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
 import { C, MONO, R, S, T } from '@/theme';
 import { Button, Card, Chip, KV, SectionTitle, Segmented } from './ui';
 
-export type InstrumentTab = 'meter' | 'scope' | 'logic' | 'bode' | 'serial';
+export type InstrumentTab = 'meter' | 'scope' | 'logic' | 'bode' | 'curve' | 'serial';
 
 export function Instruments({ tab, setTab }: { tab: InstrumentTab; setTab: (t: InstrumentTab) => void }) {
   const hasArduino = useCircuit((s) => s.doc.parts.some((p) => p.type === 'arduino'));
@@ -21,6 +22,7 @@ export function Instruments({ tab, setTab }: { tab: InstrumentTab; setTab: (t: I
     { value: 'scope', label: 'Scope' },
     { value: 'logic', label: 'Logic' },
     { value: 'bode', label: 'Bode' },
+    { value: 'curve', label: 'I–V' },
     ...(hasArduino ? [{ value: 'serial' as const, label: 'Serial' }] : []),
   ];
   return (
@@ -33,6 +35,7 @@ export function Instruments({ tab, setTab }: { tab: InstrumentTab; setTab: (t: I
         {tab === 'scope' && <Scope />}
         {tab === 'logic' && <LogicAnalyzer />}
         {tab === 'bode' && <Bode />}
+        {tab === 'curve' && <CurveTracer />}
         {tab === 'serial' && <SerialMonitor />}
       </ScrollView>
     </View>
@@ -459,6 +462,115 @@ function LogicAnalyzer() {
       <Text style={T.small}>{used.length ? used.map((k) => `L${k.slice(2)}`).join(', ') : 'No logic probes placed yet.'}</Text>
       <SectionTitle>Probes</SectionTitle>
       <ProbeChips kinds={LA_CHANNELS} labels={LA_CHANNELS.map((k) => `L${k.slice(2)}`)} />
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ curve tracer
+
+const CURVE_H = 200;
+
+/** Round a span up to 1, 2 or 5 × 10ⁿ for tidy axis limits. */
+function niceCeil(v: number): number {
+  if (v <= 0) return 1;
+  const e = Math.pow(10, Math.floor(Math.log10(v)));
+  const m = v / e;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e;
+}
+
+function CurveTracer() {
+  const doc = useCircuit((s) => s.doc);
+  const selected = useCircuit((s) => s.selection.parts);
+  const part = selected.length === 1 ? doc.parts.find((p) => p.id === selected[0]) : undefined;
+  const [res, setRes] = useState<TraceResult | null>(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = () => {
+    if (!part) return;
+    setBusy(true);
+    setErr('');
+    // let the button show its pressed state before the (short) sweep blocks the JS thread
+    setTimeout(() => {
+      try {
+        setRes(traceCurves(part));
+      } catch (e) {
+        setRes(null);
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+      setBusy(false);
+    }, 16);
+  };
+  const plot = useMemo(() => {
+    if (!res) return null;
+    const vs = res.curves.flatMap((c) => c.v);
+    const is = res.curves.flatMap((c) => c.i);
+    const x0 = Math.min(0, ...vs);
+    const x1 = Math.max(0, ...vs);
+    const y0 = Math.min(0, ...is);
+    const y1 = Math.max(0, ...is);
+    // tidy, symmetric-looking limits that include the origin
+    const xs = niceCeil(Math.max(Math.abs(x0), Math.abs(x1)) / 5) * 5;
+    const ys = niceCeil(Math.max(Math.abs(y0), Math.abs(y1)) / 4) * 4;
+    const xmin = x0 < -xs * 0.01 ? -xs : 0;
+    const ymin = y0 < -ys * 0.01 ? -ys : 0;
+    const X = (v: number) => ((v - xmin) / (xs - xmin)) * W;
+    const Y = (i: number) => CURVE_H - ((i - ymin) / (ys - ymin)) * CURVE_H;
+    return { xmin, xmax: xs, ymin, ymax: ys, X, Y };
+  }, [res]);
+  return (
+    <>
+      <Text style={T.small}>
+        Traces a part’s current–voltage characteristic on its own, out of the circuit (like a lab curve tracer). Select a resistor, diode, LED, Zener, bulb, sensor, transistor
+        or MOSFET, then tap Trace. Works with the power off.
+      </Text>
+      <View style={[styles.row, { marginTop: S.sm, alignItems: 'center' }]}>
+        <Text style={[T.label, { flex: 1 }]}>{part ? `${partLabel(part, doc.parts)} · ${part.type}` : 'No part selected'}</Text>
+        <Button icon="analytics-outline" label={busy ? 'Tracing…' : 'Trace'} kind="primary" onPress={run} disabled={!part || !canTrace(part.type) || busy} />
+      </View>
+      {part && !canTrace(part.type) && <Text style={[T.small, { color: C.ink3, marginTop: S.xs }]}>This part has no simple I–V curve. Try a resistor, diode, LED, bulb or transistor.</Text>}
+      {!!err && <Text style={[T.small, { color: C.danger, marginTop: S.sm }]}>{err}</Text>}
+      {res && plot && (
+        <>
+          <Text style={[T.label, { marginTop: S.md }]}>{res.title}</Text>
+          <View style={styles.screen}>
+            <Canvas style={{ width: W, height: CURVE_H }}>
+              <Rect x={0} y={0} width={W} height={CURVE_H} color={C.scopeBg} />
+              {Array.from({ length: 11 }, (_, k) => (
+                <Line key={`gx${k}`} p1={vec((k * W) / 10, 0)} p2={vec((k * W) / 10, CURVE_H)} color={C.scopeGrid} strokeWidth={1} />
+              ))}
+              {Array.from({ length: 9 }, (_, k) => (
+                <Line key={`gy${k}`} p1={vec(0, (k * CURVE_H) / 8)} p2={vec(W, (k * CURVE_H) / 8)} color={C.scopeGrid} strokeWidth={1} />
+              ))}
+              <Line p1={vec(plot.X(0), 0)} p2={vec(plot.X(0), CURVE_H)} color={C.borderStrong} strokeWidth={1.5} />
+              <Line p1={vec(0, plot.Y(0))} p2={vec(W, plot.Y(0))} color={C.borderStrong} strokeWidth={1.5} />
+              {res.curves.map((c, k) => (
+                <Path
+                  key={k}
+                  path={linePath(
+                    c.v.map(plot.X),
+                    c.i.map((i) => Math.max(-4, Math.min(CURVE_H + 4, plot.Y(i)))),
+                  )}
+                  style="stroke"
+                  strokeWidth={2}
+                  color={[...C.trace, '#8E4EC6'][k % 5]}
+                />
+              ))}
+            </Canvas>
+          </View>
+          <Text style={T.caption}>
+            {res.xLabel}: {formatEng(plot.xmin, 'V')} … {formatEng(plot.xmax, 'V')} ({formatEng((plot.xmax - plot.xmin) / 10, 'V')}/div) · {res.yLabel}: {formatEng(plot.ymin, 'A')} …{' '}
+            {formatEng(plot.ymax, 'A')} ({formatEng((plot.ymax - plot.ymin) / 8, 'A')}/div)
+          </Text>
+          {res.curves.length > 1 && (
+            <View style={[styles.row, { marginTop: S.xs }]}>
+              {res.curves.map((c, k) => (
+                <Chip key={k} label={c.label} color={[...C.trace, '#8E4EC6'][k % 5]} active />
+              ))}
+            </View>
+          )}
+          <Text style={[T.small, { marginTop: S.sm }]}>{res.note}</Text>
+        </>
+      )}
     </>
   );
 }

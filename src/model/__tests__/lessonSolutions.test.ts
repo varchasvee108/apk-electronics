@@ -66,6 +66,10 @@ class Bench {
       d.parts.find((p) => p.id === id)!.props[key] = value;
     });
   }
+  /** What the inspector's Repair / Replace fuse button does. */
+  repair(id: string): void {
+    for (const d of this.sim.devices) if (d.partId === id || d.id === id) this.sim.repair(d.id);
+  }
   probe(kind: keyof CircuitDoc['probes'], at: At): void {
     this.edit((d) => {
       d.probes[kind] = P(at);
@@ -171,6 +175,18 @@ const SOLUTIONS: Record<string, Solution> = {
       b.run(0.1);
     },
   },
+  bulbs: {
+    idle: 1,
+    solve(b) {
+      const a = hole('a14');
+      b.edit((d) => {
+        d.wires = d.wires.filter((w) => !(w.a.x === a.x && w.a.y === a.y));
+      });
+      b.wire(railNear('top', '+', 20), 'a20');
+      b.wire('a14', railNear('top', '-', 14));
+      b.run(1);
+    },
+  },
   divider: { solve: (b) => (b.prop('r2', 'r', 1000), b.run(0.1)) },
   rc: { idle: 4, solve: (b) => (b.prop('r1', 'r', 4700), b.run(4)) },
   rl: { maxStep: 1e-4, solve: (b) => (b.probe('ch1', 'b14'), b.run(0.05)) },
@@ -202,6 +218,13 @@ const SOLUTIONS: Record<string, Solution> = {
   'led-resistor': {
     solve(b) {
       b.edit((d) => d.parts.push({ id: 'rx', type: 'resistor', x: colX(16), y: hole('c16').y, rot: 0, props: { r: 470, maxP: 0.25 } }));
+      b.run(0.1);
+    },
+  },
+  'rgb-mixing': {
+    solve(b) {
+      b.wire('j30', railNear('bottom', '+', 30));
+      b.wire('j32', railNear('bottom', '+', 32));
       b.run(0.1);
     },
   },
@@ -244,6 +267,13 @@ const SOLUTIONS: Record<string, Solution> = {
       b.run(0.05);
     },
   },
+  'schmitt-oscillator': {
+    idle: 2.5,
+    solve(b) {
+      b.edit((d) => d.parts.push({ id: 'rf', type: 'resistor', x: colX(12), y: hole('j12').y, rot: 0, props: { r: 47e3, maxP: 0.25 } }));
+      b.run(2.5);
+    },
+  },
   'flipflop-divider': { idle: 6, solve: (b) => (b.wire('g45', 'g41'), b.run(6)) },
   counter: { idle: 5, solve: (b) => (b.wire('j22', 'i41'), b.run(5)) },
   'shift-register': {
@@ -273,6 +303,7 @@ const SOLUTIONS: Record<string, Solution> = {
       b.run(0.05);
     },
   },
+  'bcd-decoder': { solve: (b) => (b.prop('sA', 'pos', true), b.prop('sC', 'pos', true), b.run(0.05)) },
   'arduino-blink': { maxStep: 1e-3, idle: 2.2, solve: (b) => (b.wire({ x: 30, y: 28 }, 'j30'), b.run(2.2)) },
   'arduino-button': {
     maxStep: 1e-3,
@@ -290,6 +321,43 @@ const SOLUTIONS: Record<string, Solution> = {
       b.wire({ x: 37, y: 52 }, { x: 38, y: 47 });
       b.prop('rv1', 'pos', 0.9);
       b.run(0.35);
+    },
+  },
+  lm317: { solve: (b) => (b.prop('r2', 'r', 720), b.run(0.05)) },
+  fuse: {
+    solve(b) {
+      b.run(0.05);
+      b.prop('sw1', 'pressed', true);
+      b.run(0.05);
+      b.prop('sw1', 'pressed', false);
+      b.run(0.05);
+      b.repair('f1');
+      b.run(0.1);
+    },
+  },
+  darlington: {
+    idle: 1,
+    solve(b) {
+      b.edit((d) => d.parts.push({ id: 'rb', type: 'resistor', x: colX(28), y: hole('d28').y, rot: 0, props: { r: 1000, maxP: 0.25 } }));
+      b.prop('sw1', 'pressed', true);
+      b.run(1);
+    },
+  },
+  lm35: {
+    solve(b) {
+      b.prop('u1', 'tempC', 37);
+      b.probe('dmm+', 'b31');
+      b.probe('dmm-', railNear('top', '-', 34));
+      b.run(0.05);
+    },
+  },
+  'servo-knob': {
+    maxStep: 1e-3,
+    idle: 0.6,
+    solve(b) {
+      b.wire({ x: 37, y: 52 }, { x: 38, y: 47 });
+      b.prop('rv1', 'pos', 0.5);
+      b.run(0.7);
     },
   },
   // ---------------------------------------------------------------- challenges

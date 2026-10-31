@@ -84,6 +84,40 @@ describe('Arduino Uno co-simulation (avr8js)', () => {
     expect(Math.abs(f - 16e6 / 64 / 256)).toBeLessThan(5);
   });
 
+  test('Servo Sweep: 50 Hz pulses on pin 9 sweep the servo across its range', () => {
+    const sim = uno(program('servo-sweep'), (b) => b.add('servo', 'S1', ['0', '5V', 'D9'], {}));
+    sim.maxStep = 1e-3;
+    sim.startTransient();
+    const w: { t: number[]; v: number[] } = { t: [], v: [] };
+    let maxA = 0;
+    let minLate = 180;
+    sim.advance(2.5, {
+      onStep: (s) => {
+        if (s.t < 0.3) (w.t.push(s.t), w.v.push(s.v('D9')));
+        const a = Number(s.read('S1').extra?.angle);
+        maxA = Math.max(maxA, a);
+        if (s.t > 2.3) minLate = Math.min(minLate, a);
+      },
+    });
+    const f = frequency(w.t, w.v, 2.5, 0.05);
+    expect(Math.abs(f - 50)).toBeLessThan(0.5);
+    expect(maxA).toBeGreaterThan(175); // reaches 180° after ~2 s
+    expect(minLate).toBeLessThan(178); // and is on its way back
+  });
+
+  test('Servo Knob: the pot position sets the angle', () => {
+    const angle = (frac: number) => {
+      const sim = uno(program('servo-knob'), (b) =>
+        b.R('RA', '5V', 'A0', 10e3 * (1 - frac) + 1).R('RB', 'A0', '0', 10e3 * frac + 1).add('servo', 'S1', ['0', '5V', 'D9'], {}),
+      );
+      sim.transient(0.6, {}, { maxStep: 1e-3 });
+      return Number(sim.read('S1').extra?.angle);
+    };
+    expect(angle(0)).toBeLessThan(3);
+    expect(Math.abs(angle(0.5) - 92)).toBeLessThan(4);
+    expect(angle(1)).toBeGreaterThan(177);
+  });
+
   test('Analog Read Serial prints the A0 voltage as 0–1023', () => {
     const sim = uno(program('analog-read'), (b) => b.R('RA', '5V', 'A0', 10e3).R('RB', 'A0', '0', 10e3));
     sim.transient(0.25, {}, { maxStep: 5e-4 });

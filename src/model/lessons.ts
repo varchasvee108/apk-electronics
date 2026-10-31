@@ -1,5 +1,5 @@
 import { DocBuilder, WIRE, addRails, dipHole, railNear } from './build';
-import { arduinoProgram, astable555 } from './examples';
+import { arduinoProgram, astable555, servoOnBreadboard } from './examples';
 import type { CircuitDoc } from './types';
 
 export type Check =
@@ -22,7 +22,11 @@ export type Check =
   | { kind: 'nightLight'; label: string }
   | { kind: 'hasPart'; type: string; count?: number; label: string }
   | { kind: 'probe'; probe: string; label: string }
-  | { kind: 'noDamage'; label: string };
+  | { kind: 'noDamage'; label: string }
+  /** A live value the part reports (servo angle, motor rpm, bulb brightness…). */
+  | { kind: 'extra'; part: string; key: string; min: number; max: number; unit?: string; label: string }
+  /** The part was seen damaged (or a fuse blown) at some point. */
+  | { kind: 'wasFailed'; part: string; label: string };
 
 export interface Lesson {
   id: string;
@@ -62,6 +66,8 @@ export const UNITS: Unit[] = [
   { id: 'u14', title: 'Flip-flops, counters & shift registers', summary: 'Circuits with memory.' },
   { id: 'u15', title: '7-segment displays', summary: 'Showing numbers.' },
   { id: 'u16', title: 'Arduino basics', summary: 'Code meets circuit.' },
+  { id: 'u17', title: 'Power & protection', summary: 'Adjustable regulators, fuses and power transistors.' },
+  { id: 'u18', title: 'Sensors & actuators', summary: 'Measuring temperature and moving things.' },
 ];
 
 const rails = (name: string, opts: Parameters<typeof addRails>[1] = {}) => {
@@ -144,6 +150,36 @@ export const LESSONS: Lesson[] = [
       const b = rails('Parallel');
       b.part('resistor', 'c10', { props: { r: 1000 }, id: 'r1' });
       b.part('resistor', 'c20', { props: { r: 1000 }, id: 'r2' });
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'bulbs',
+    unit: 'u2',
+    title: 'Bulbs in series and parallel',
+    minutes: 8,
+    goal: 'The two 6 V bulbs are in series and glow dimly. Rewire them in parallel so both glow at full brightness.',
+    intro: [
+      'In series the same current flows through both bulbs and they share the battery voltage: each gets about 3 V, and a filament bulb at half voltage gives less than a tenth of its light.',
+      'In parallel each bulb connects straight across the battery, so each gets the full 6 V. The battery then supplies the current for both.',
+      'Notice that a bulb is not a fixed resistor: the hotter its filament, the higher its resistance. Tap a bulb to see its resistance change.',
+    ],
+    hints: [
+      'Delete the yellow wire that links the bulbs (a14 → a20).',
+      'Then wire the + rail to a20 and a14 to the − rail, so each bulb has one end on + and one on −.',
+    ],
+    checks: [
+      { kind: 'extra', part: 'lp1', key: 'brightness', min: 0.7, max: 10, label: 'Bulb 1 at full brightness' },
+      { kind: 'extra', part: 'lp2', key: 'brightness', min: 0.7, max: 10, label: 'Bulb 2 at full brightness' },
+      noDamage,
+    ],
+    build() {
+      const b = rails('Bulbs in series and parallel', { v: 6 });
+      b.part('lamp', 'e10', { id: 'lp1' });
+      b.part('lamp', 'e20', { id: 'lp2' });
+      b.wire(railNear('top', '+', 10), 'a10', WIRE.red);
+      b.wire('a14', 'a20', WIRE.yellow);
+      b.wire('a24', railNear('top', '-', 24), WIRE.black);
       return b.build('lesson');
     },
   },
@@ -315,6 +351,35 @@ export const LESSONS: Lesson[] = [
       b.wire(railNear('top', '+', 16), 'a16', WIRE.red);
       b.part('led', 'd20', { id: 'd1' });
       b.wire('a21', railNear('top', '-', 21), WIRE.black);
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'rgb-mixing',
+    unit: 'u7',
+    title: 'Mixing colours with an RGB LED',
+    minutes: 8,
+    goal: 'Make the RGB LED glow yellow: connect the red and green resistors to the + rail and leave blue off.',
+    intro: [
+      'An RGB LED is three LEDs (red, green and blue) under one dome. They share the cathode K (column 31), which is wired to ground.',
+      'Each anode already has its own resistor crossing the centre channel: red in column 30, green in 32, blue in 33. Wire a resistor’s lower end (row j) to the bottom + rail and that colour lights.',
+      'Light adds up: red + green looks yellow, red + blue magenta, green + blue cyan, and all three white. Try them all after you pass!',
+    ],
+    hints: ['Wire j30 (red) and j32 (green) to the bottom + rail.', 'Blue has a smaller resistor (560 Ω) because its forward voltage (3.1 V) is higher than red’s (1.9 V).'],
+    checks: [
+      { kind: 'ledOn', part: 'rgb1.r', label: 'Red on' },
+      { kind: 'ledOn', part: 'rgb1.g', label: 'Green on' },
+      { kind: 'ledOff', part: 'rgb1.b', label: 'Blue off' },
+      noDamage,
+    ],
+    build() {
+      const b = rails('RGB colour mixing', { bottom: true });
+      b.part('rgbled', 'a30', { id: 'rgb1' });
+      b.wire('c31', 'c26', WIRE.black); // common cathode → ground
+      b.wire('a26', railNear('top', '-', 26), WIRE.black);
+      b.part('resistor', 'd30', { rot: 1, props: { r: 680 }, id: 'rr' });
+      b.part('resistor', 'd32', { rot: 1, props: { r: 680 }, id: 'rg' });
+      b.part('resistor', 'd33', { rot: 1, props: { r: 560 }, id: 'rb' });
       return b.build('lesson');
     },
   },
@@ -649,6 +714,39 @@ export const LESSONS: Lesson[] = [
       return b.build('lesson');
     },
   },
+  {
+    id: 'schmitt-oscillator',
+    unit: 'u13',
+    title: 'A Schmitt-trigger oscillator',
+    minutes: 10,
+    goal: 'Add one resistor from the inverter output to its input (j16 → j12) so the LED blinks about twice a second.',
+    intro: [
+      'A 74HC14 inverter has Schmitt-trigger inputs: its output only flips when the input rises above about 2.7 V or falls below about 1.6 V. That gap is called hysteresis.',
+      'Feed the output back to the input through a resistor, with a capacitor from the input to ground. The output (high) charges the capacitor until the upper threshold, flips low, discharges it to the lower threshold, flips high… forever.',
+      'The frequency is about f ≈ 1.1 / (R·C). The capacitor is 10 µF; the output already reaches column 16 and the input column 12.',
+    ],
+    hints: ['R = 1.1 / (2 Hz × 10 µF) ≈ 55 kΩ: use 47 kΩ (≈2.3 Hz).', 'Place a resistor so its leads sit in j12 and j16, then set it to 47k.'],
+    checks: [{ kind: 'blinks', part: 'd1', min: 4, label: 'LED blinks (4 or more times)' }, noDamage],
+    build() {
+      const b = rails('Schmitt oscillator', { supply: true, v: 5, bottom: true });
+      const T = (k: number, row = 0) => dipHole(20, 14, k, row);
+      b.part('ic7414', 'e20', { id: 'u1' });
+      b.wire(railNear('top', '+', 20), T(14), WIRE.red); // VCC
+      b.wire(T(7), railNear('bottom', '-', 26), WIRE.black); // GND
+      // unused inputs to ground
+      for (const k of [3, 5]) b.wire(T(k, 0), railNear('bottom', '-', 20 + k - 1), WIRE.black);
+      for (const k of [9, 11, 13]) b.wire(T(k, 0), railNear('top', '-', 20 + (14 - k)), WIRE.black);
+      b.part('ecap', 'h12', { props: { c: 10e-6 }, id: 'c1' });
+      b.wire('j14', railNear('bottom', '-', 14), WIRE.black);
+      b.wire(T(1, 1), 'g12', WIRE.yellow); // 1A → capacitor
+      b.wire(T(2, 2), 'i16', WIRE.yellow); // 1Y → feedback point
+      b.wire(T(2, 1), 'h30', WIRE.yellow); // 1Y → LED
+      b.part('resistor', 'i30', { props: { r: 330 }, id: 'r1' });
+      b.part('led', 'h34', { props: { color: 'green' }, id: 'd1' });
+      b.wire('j35', railNear('bottom', '-', 35), WIRE.black);
+      return b.build('lesson');
+    },
+  },
   // ------------------------------------------------------------------ U14
   {
     id: 'counter',
@@ -798,6 +896,64 @@ export const LESSONS: Lesson[] = [
       return b.build('lesson');
     },
   },
+  {
+    id: 'bcd-decoder',
+    unit: 'u15',
+    title: 'BCD to 7-segment decoder',
+    minutes: 10,
+    goal: 'Set the four switches to the binary code for 5 (D C B A = 0 1 0 1) so the display shows 5.',
+    intro: [
+      'A CD4511 turns a 4-bit binary-coded decimal (BCD) number into the seven segment signals for one digit. Its inputs are A (worth 1), B (2), C (4) and D (8).',
+      'Each slide switch connects an input to ground (left, 0) or to +5 V (right, 1). Each segment has its own 330 Ω resistor, so every segment is equally bright whatever the digit.',
+      'LT (lamp test) and BI (blanking) are tied high and LE (latch enable) low for normal operation. Try other codes: 10–15 blank the display.',
+    ],
+    hints: ['5 = 4 + 1, so switches A and C go to the right (1), B and D stay left (0).', 'Tap a switch while running to flip it.'],
+    checks: [{ kind: 'segments', part: 'ds1', on: ['a', 'c', 'd', 'f', 'g'], label: 'Display shows 5' }, noDamage],
+    build() {
+      const b = rails('BCD decoder', { supply: true, v: 5, bottom: true });
+      b.part('cd4511', 'e10', { id: 'u1' });
+      b.wire(railNear('top', '+', 10), 'a10', WIRE.red); // VDD
+      b.wire('j17', railNear('bottom', '-', 17), WIRE.black); // VSS
+      b.wire('j12', railNear('bottom', '+', 12), WIRE.red); // LT high
+      b.wire('j13', railNear('bottom', '+', 13), WIRE.red); // BI high
+      b.wire('j14', railNear('bottom', '-', 15), WIRE.black); // LE low
+      // input switches: left = 0 (GND), right = 1 (+5 V)
+      const inputs: [string, string, string][] = [
+        ['sA', 'A', 'g16'],
+        ['sB', 'B', 'i10'],
+        ['sC', 'C', 'h11'],
+        ['sD', 'D', 'j15'],
+      ];
+      inputs.forEach(([id, label, to], i) => {
+        const c = 22 + 4 * i;
+        b.part('toggle', `h${c}`, { id, label });
+        b.wire(`j${c}`, railNear('bottom', '-', c), WIRE.black);
+        b.wire(`j${c + 2}`, railNear('bottom', '+', c + 2), WIRE.red);
+        b.wire(`${i % 2 ? 'i' : 'g'}${c + 1}`, to, WIRE.yellow);
+      });
+      // display and one resistor per segment
+      b.part('sevenseg', 'e40', { id: 'ds1' });
+      b.wire('j42', railNear('bottom', '-', 42), WIRE.black); // COM
+      const segs: [string, number, string][] = [
+        ['f', 11, 'a41'],
+        ['g', 12, 'b40'],
+        ['a', 13, 'b43'],
+        ['b', 14, 'a44'],
+        ['c', 15, 'i43'],
+        ['d', 16, 'j41'],
+        ['e', 17, 'i40'],
+      ];
+      const starts = [18, 19, 20, 21, 26, 27, 28];
+      segs.forEach(([seg, col, target], i) => {
+        const s0 = starts[i];
+        const row = 'abcd'[i % 4];
+        b.part('resistor', `${row}${s0}`, { props: { r: 330 }, id: `rs${seg}` });
+        b.wire(`${'abcd'[(i + 1) % 4]}${col}`, `e${s0}`, WIRE.green);
+        b.wire(`e${s0 + 4}`, target, WIRE.green);
+      });
+      return b.build('lesson');
+    },
+  },
   // ------------------------------------------------------------------ U16
   {
     id: 'arduino-blink',
@@ -871,6 +1027,139 @@ export const LESSONS: Lesson[] = [
       b.wire({ x: 36, y: 52 }, { x: 34, y: 47 }, WIRE.black); // GND
       b.wire({ x: 38, y: 52 }, { x: 33, y: 47 }, WIRE.red); // 5V
       b.part('ground', { x: 35, y: 47 }, { id: 'gnd' });
+      return b.build('lesson');
+    },
+  },
+  // ------------------------------------------------------------------ U17
+  {
+    id: 'lm317',
+    unit: 'u17',
+    title: 'An adjustable regulator',
+    minutes: 8,
+    goal: 'Change R2 so the LM317 outputs 5 V (± 4 %) at column 33.',
+    intro: [
+      'The LM317 always keeps 1.25 V between its OUT and ADJ pins. R1 (240 Ω, OUT → ADJ) therefore carries 1.25 V / 240 Ω ≈ 5.2 mA.',
+      'That current also flows through R2 from ADJ to ground, lifting ADJ above 0 V. So V_out = 1.25 V × (1 + R2 / R1). With R2 = 240 Ω you get 2.5 V.',
+      'Measure the output (column 33) with the meter, then pick R2 for 5 V. Any input at least 1.7 V above the output works.',
+    ],
+    hints: ['5 = 1.25 × (1 + R2 / 240) → R2 = 720 Ω (or 750 Ω from the E24 series).', 'Select R2 and type 720 in its value box.'],
+    checks: [{ kind: 'voltage', at: 'a33', min: 4.8, max: 5.2, label: 'Output at 5 V' }, noDamage],
+    build() {
+      const b = rails('LM317 regulator');
+      b.part('lm317', 'e34', { rot: 2, id: 'u1' }); // ADJ col 34, OUT col 33, IN col 32
+      b.wire(railNear('top', '+', 32), 'a32', WIRE.red);
+      b.part('resistor', 'b33', { props: { r: 240 }, id: 'r1' });
+      b.wire('c34', 'c37', WIRE.yellow);
+      b.part('resistor', 'd37', { props: { r: 240 }, id: 'r2' });
+      b.wire('a41', railNear('top', '-', 41), WIRE.black);
+      b.probe('dmm+', 'c33').probe('dmm-', railNear('top', '-', 44));
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'fuse',
+    unit: 'u17',
+    title: 'A fuse saves the day',
+    minutes: 6,
+    goal: 'Press FAULT to short the supply and watch the fuse blow. Then release it, repair the fuse, and get the LED shining again.',
+    intro: [
+      'A short circuit lets a battery push amps through a thin wire: the wire heats up and things get damaged. A fuse is a deliberately weak link that melts first.',
+      'Here a 500 mA fuse feeds an LED. The FAULT button connects the fused line straight to ground, like a slipped wire.',
+      'Once the fuse has blown the circuit is open and safe. A real fuse must then be replaced: tap it and choose Replace fuse, but only after the fault is gone.',
+    ],
+    hints: ['Hold FAULT while running: the fuse opens within milliseconds.', 'Release FAULT first, then select the fuse and tap Replace fuse.'],
+    checks: [
+      { kind: 'wasFailed', part: 'f1', label: 'The fuse blew during the short' },
+      { kind: 'ledOn', part: 'd1', label: 'LED back on after replacing the fuse' },
+      noDamage,
+    ],
+    build() {
+      const b = rails('Fuse protection', { bottom: true });
+      b.wire(railNear('top', '+', 10), 'a10', WIRE.red);
+      b.part('fuse', 'c10', { props: { rating: 0.5 }, id: 'f1' });
+      b.part('resistor', 'd14', { props: { r: 470 }, id: 'r1' });
+      b.part('led', 'c18', { id: 'd1' });
+      b.wire('a19', railNear('top', '-', 19), WIRE.black);
+      b.wire('e14', 'g14', WIRE.yellow);
+      b.part('button', 'h14', { id: 'sw1', label: 'FAULT' });
+      b.wire('j16', railNear('bottom', '-', 16), WIRE.black);
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'darlington',
+    unit: 'u17',
+    title: 'Driving a motor with a TIP120',
+    minutes: 8,
+    goal: 'Add a 1 kΩ base resistor from the button (column 28) to the TIP120 base (column 32), then hold the button to run the motor.',
+    intro: [
+      'A motor needs far more current than a switch contact, logic output or Arduino pin should carry. A TIP120 Darlington pair has a current gain over 1000, so a few milliamps into its base switch amps through the motor.',
+      'The emitter (column 30) goes to ground and the motor sits between +9 V and the collector (column 31). The diode across the motor catches the voltage spike when the current stops (a flyback diode).',
+      'The base needs a resistor: without one the base current would be limited only by the battery.',
+    ],
+    hints: ['Base current ≈ (9 − 1.4) V / 1 kΩ ≈ 7.6 mA, plenty to saturate it.', 'Place a resistor with leads in d28 and d32 and set it to 1k.'],
+    checks: [
+      { kind: 'prop', part: 'sw1', key: 'pressed', equals: true, label: 'Button held down' },
+      { kind: 'extra', part: 'm1', key: 'rpm', min: 3000, max: 1e9, unit: ' rpm', label: 'Motor running fast' },
+      noDamage,
+    ],
+    build() {
+      const b = rails('TIP120 motor driver');
+      b.part('tip120', 'e32', { rot: 2, id: 'q1' }); // B col 32, C col 31, E col 30
+      b.wire('a30', railNear('top', '-', 30), WIRE.black);
+      b.part('motor', { x: 34, y: -6 }, { id: 'm1' });
+      b.wire({ x: 34, y: -6 }, railNear('top', '+', 33), WIRE.red);
+      b.wire({ x: 37, y: -6 }, 'a31', WIRE.blue);
+      b.part('diode', 'c31', { props: { model: '1N4001' }, id: 'd1' });
+      b.wire('a35', railNear('top', '+', 35), WIRE.red);
+      b.part('button', 'c26', { id: 'sw1' });
+      b.wire(railNear('top', '+', 26), 'a26', WIRE.red);
+      return b.build('lesson');
+    },
+  },
+  // ------------------------------------------------------------------ U18
+  {
+    id: 'lm35',
+    unit: 'u18',
+    title: 'Reading a temperature sensor',
+    minutes: 6,
+    goal: 'Set the LM35 to body temperature (37 °C) and measure its output with the multimeter: it should read 0.37 V.',
+    intro: [
+      'The LM35 outputs 10 mV for every degree Celsius: 250 mV at 25 °C, 370 mV at 37 °C. It needs 4 V or more on +VS and draws only about 60 µA.',
+      'Place the meter’s red probe on VOUT (column 31) and the black probe on ground, then change the temperature with the slider in the inspector.',
+    ],
+    hints: ['Red probe in b31, black probe on the top − rail.', 'Select the sensor and drag Temperature to 37 °C.'],
+    checks: [
+      { kind: 'prop', part: 'u1', key: 'tempC', min: 36.5, max: 37.5, label: 'Sensor at 37 °C' },
+      { kind: 'dmm', min: 0.36, max: 0.38, label: 'Meter reads 0.37 V' },
+    ],
+    build() {
+      const b = rails('LM35 thermometer', { supply: true, v: 5 });
+      b.part('lm35', 'e30', { id: 'u1' });
+      b.wire(railNear('top', '+', 30), 'a30', WIRE.red);
+      b.wire('a32', railNear('top', '-', 32), WIRE.black);
+      return b.build('lesson');
+    },
+  },
+  {
+    id: 'servo-knob',
+    unit: 'u18',
+    title: 'Point a servo with a knob',
+    minutes: 8,
+    goal: 'Wire the pot’s wiper to A0, then turn the knob until the servo points straight up (90° ± 10°).',
+    intro: [
+      'A servo turns to the angle set by the width of a pulse it receives every 20 ms: 1 ms is 0°, 1.5 ms is 90°, 2 ms is 180°.',
+      'The Uno runs the Servo Knob program: it reads A0 and sets Timer1 to make pulses from 1 ms (A0 = 0) to about 2 ms (A0 = 1023) on pin 9, which drives the servo’s signal wire.',
+      'The servo runs from its own 5 V supply on the rails, sharing ground with the Uno: motors make supply noise that can upset a microcontroller. Put CH1 on pin 9 to see the pulses get wider as you turn the knob.',
+    ],
+    hints: ['The wiper is the pot’s middle pin; A0 is on the bottom header.', 'Select the pot and drag its slider to the middle while running.'],
+    checks: [{ kind: 'extra', part: 'sv1', key: 'angle', min: 80, max: 100, unit: '°', label: 'Servo at 90°' }, noDamage],
+    build() {
+      const b = new DocBuilder('Servo knob');
+      servoOnBreadboard(b, 'servo-knob');
+      b.part('pot', { x: 36, y: 52 }, { id: 'rv1', props: { pos: 0.15 } });
+      b.wire({ x: 36, y: 52 }, { x: 34, y: 47 }, WIRE.black); // GND
+      b.wire({ x: 38, y: 52 }, { x: 33, y: 47 }, WIRE.red); // 5V
       return b.build('lesson');
     },
   },

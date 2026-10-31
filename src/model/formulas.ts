@@ -148,6 +148,83 @@ export function explain(part: PartInstance, live: PartLive | null): Why[] {
         },
       ];
     }
+    case 'tip120': {
+      const q1 = L?.els.q1?.extra ?? {};
+      const ib = n(q1.ib, 0) + n(L?.els.r1?.i, 0);
+      const ic = n(L?.extra.ic, 0) + n(q1.ic, 0);
+      const vbe = L ? (L.pinV[0] ?? 0) - (L.pinV[2] ?? 0) : 0;
+      const vce = L ? (L.pinV[1] ?? 0) - (L.pinV[2] ?? 0) : 0;
+      return [
+        {
+          title: 'Darlington gain',
+          formula: 'I_C ≈ β₁ · β₂ · I_B,   V_BE ≈ 2 × 0.7 V',
+          live: L ? `I_B = ${f(ib, 'A')},  I_C = ${f(ic, 'A')},  gain ≈ ${Math.abs(ib) > 1e-9 ? Math.round(ic / ib) : '—'},  V_BE = ${f(vbe, 'V')},  V_CE = ${f(vce, 'V')}` : undefined,
+          note: 'Huge gain means a tiny base current switches amps. The cost: V_CE stays near 0.8 V or more even when fully on, so it dissipates P = V_CE · I_C.',
+        },
+      ];
+    }
+    case 'lm317':
+      return [
+        {
+          title: 'Setting the output',
+          formula: 'V_out = 1.25 V · (1 + R2 / R1)',
+          live: L ? `V(OUT) − V(ADJ) = ${f(L.v, 'V')},  P = ${f(Math.abs(L.p), 'W')}${L.extra.dropout ? '  (in dropout: raise V_in)' : ''}` : undefined,
+          note: 'R1 (OUT → ADJ) sets the current 1.25 V / R1; the same current through R2 (ADJ → GND) adds 1.25 V · R2 / R1. Keep V_in at least 1.7 V above V_out.',
+        },
+      ];
+    case 'lm35': {
+      const t = n(p.tempC, 25);
+      return [
+        {
+          title: '10 mV per degree',
+          formula: 'V_out = 10 mV/°C × T',
+          live: `${t} °C → expected ${f(t * 0.01, 'V')}${L ? `, measured ${f(L.v, 'V')}` : ''}`,
+          note: 'On an Arduino: T = reading × 5 V / 1023 / 10 mV ≈ reading × 0.49 °C.',
+        },
+      ];
+    }
+    case 'fuse': {
+      const rating = n(p.rating, 0.5);
+      return [
+        {
+          title: 'Fuse rating',
+          formula: 'blows when I stays above the rating (I²R heats the wire)',
+          live: L ? (L.failed ? 'Blown: the circuit is open.' : `I = ${f(Math.abs(L.i), 'A')} of ${f(rating, 'A')} (${Math.round((Math.abs(L.i) / rating) * 100)} %)`) : undefined,
+          note: 'Pick a rating a little above the normal current. 2× the rating blows it in about a tenth of a second; a short circuit, instantly.',
+        },
+      ];
+    }
+    case 'lamp': {
+      const [vr, ir] = String(p.type ?? '6:0.2').split(':').map(Number);
+      return [
+        {
+          title: 'A resistance that depends on temperature',
+          formula: 'R_hot = V_rated / I_rated,   R_cold ≈ R_hot / 10,   I ∝ V^0.6',
+          live: L ? `R now = ${f(n(L.extra.r, 0), 'Ω')} (hot ${f(vr / ir, 'Ω')}),  I = ${f(Math.abs(L.i), 'A')},  P = ${f(Math.abs(L.p), 'W')}` : undefined,
+          note: 'Doubling the voltage does not double the current: the filament gets hotter and its resistance rises. Light output rises much faster than power.',
+        },
+      ];
+    }
+    case 'servo': {
+      const pw = n(L?.extra.pw, 0);
+      return [
+        {
+          title: 'Pulse width → angle',
+          formula: 'angle = (t_pulse − 1 ms) / 1 ms × 180°,   one pulse every 20 ms',
+          live: L ? (pw > 0 ? `pulse ${f(pw, 's')} → target ${Math.round(n(L.extra.target, 0))}°, now ${Math.round(n(L.extra.angle, 0))}°` : 'No control pulses yet: the servo holds still.') : undefined,
+          note: 'The servo compares the requested angle with a potentiometer on its shaft and drives its motor until they match.',
+        },
+      ];
+    }
+    case 'rgbled':
+      return [
+        {
+          title: 'Additive colour',
+          formula: 'R + G = yellow,  R + B = magenta,  G + B = cyan,  R + G + B = white',
+          live: L ? `R ${f(n(L.els.r?.i, 0), 'A')},  G ${f(n(L.els.g?.i, 0), 'A')},  B ${f(n(L.els.b?.i, 0), 'A')}` : undefined,
+          note: 'Each colour is its own LED with its own forward voltage, so each needs its own resistor.',
+        },
+      ];
     case 'lm7805':
       return [
         {

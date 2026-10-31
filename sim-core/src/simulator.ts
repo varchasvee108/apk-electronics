@@ -594,11 +594,14 @@ export class Simulator {
     for (const d of this.devices) {
       const name = d.partId ?? d.id;
       if (d.failed) {
+        const fuse = d.type === 'fuse';
         out.push({
           severity: 'error',
           code: 'failed',
-          title: `${name} is damaged`,
-          message: `${name} failed from ${d.failReason}. Fix the cause, then tap "Repair" to replace it.`,
+          title: fuse ? `${name} has blown` : `${name} is damaged`,
+          message: fuse
+            ? `${name} opened because more than its ${formatEng(d.num('rating', 0.5), 'A')} rating flowed. It did its job: find the short or overload, fix it, then tap "Repair" to fit a new fuse.`
+            : `${name} failed from ${d.failReason}. Fix the cause, then tap "Repair" to replace it.`,
           elementId: d.id,
           partId: d.partId,
         });

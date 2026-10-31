@@ -899,6 +899,111 @@ const lm7805: PartDef = {
   },
 };
 
+const lm317: PartDef = {
+  type: 'lm317',
+  name: 'LM317 adjustable regulator',
+  category: 'Analog ICs',
+  prefix: 'U',
+  pins: [
+    { name: 'ADJ', dx: 0, dy: 0 },
+    { name: 'OUT', dx: 1, dy: 0 },
+    { name: 'IN', dx: 2, dy: 0 },
+  ],
+  box: { x: -0.6, y: -2.8, w: 3.2, h: 3.2 },
+  defaults: {},
+  props: [],
+  // keeps OUT 1.25 V above ADJ; ≈50 µA flows out of ADJ
+  expand: (_p, ctx) => [el(ctx, '', 'reg', [ctx.pin(2), ctx.pin(0), ctx.pin(1)], { vout: 1.25, dropout: 1.7, iq: 15e-6, rout: 0.01, maxI: 1.5, maxP: 2 })],
+  value: () => 'adj',
+  info: {
+    summary: 'Adjustable linear regulator: two resistors set any output from 1.25 V to about 30 V.',
+    pinout: ['ADJ : adjust (to the R1/R2 divider)', 'OUT : output (tab)', 'IN : input'],
+    specs: [
+      ['Reference', 'V(OUT) − V(ADJ) = 1.25 V'],
+      ['Output', 'V_out = 1.25 V · (1 + R2 / R1)'],
+      ['Dropout', '≈1.7 V'],
+      ['Max current', '1.5 A (with heatsink)'],
+    ],
+    how: 'The LM317 keeps exactly 1.25 V between OUT and ADJ. Put R1 (typically 240 Ω) from OUT to ADJ: it carries 1.25 V / R1 ≈ 5 mA. That same current flows down R2 from ADJ to GND, so V_out = 1.25 V + 5 mA · R2 = 1.25 · (1 + R2/R1). Like the 7805 it turns the excess voltage into heat.',
+    typical: ['Adjustable bench supply with a pot as R2', '3.3 V from 5–9 V (R1 = 240 Ω, R2 = 390 Ω)', 'Constant-current LED driver'],
+  },
+  keywords: 'voltage regulator adjustable lm317',
+};
+
+const lm35: PartDef = {
+  type: 'lm35',
+  name: 'LM35 temperature sensor',
+  category: 'Switches & sensors',
+  prefix: 'U',
+  pins: [
+    { name: '+VS', dx: 0, dy: 0 },
+    { name: 'VOUT', dx: 1, dy: 0 },
+    { name: 'GND', dx: 2, dy: 0 },
+  ],
+  box: { x: -0.5, y: -1.5, w: 3, h: 1.9 },
+  defaults: { tempC: 25 },
+  props: [{ key: 'tempC', label: 'Temperature', kind: 'slider', unit: '°C', min: 2, max: 150, step: 0.5, live: true }],
+  expand: (p, ctx) => [
+    el(ctx, '', 'reg', [ctx.pin(0), ctx.pin(2), ctx.pin(1)], { vout: n(p.props.tempC, 25) * 0.01, dropout: 1.5, iq: 21e-6, rout: 0.5, maxI: 0.01, maxP: 0.3 }),
+  ],
+  value: (p) => `${n(p.tempC, 25)} °C`,
+  info: {
+    summary: 'Precision analog temperature sensor: its output is 10 mV per °C (250 mV at 25 °C).',
+    pinout: ['+VS : supply 4–30 V (flat face towards you, legs down: +VS VOUT GND)', 'VOUT : 10 mV/°C', 'GND'],
+    specs: [
+      ['Scale', '10.0 mV / °C, 0 V at 0 °C'],
+      ['Accuracy', '±0.5 °C at 25 °C'],
+      ['Supply current', '≈60 µA (barely warms itself)'],
+      ['Output', 'can source ≈10 mA; this basic circuit reads 2–150 °C'],
+    ],
+    how: 'Inside, the voltage across a pair of transistors running at different current densities rises in proportion to absolute temperature; the chip scales and offsets it to 10 mV/°C. Read it with a meter, a comparator or an Arduino ADC: T = V_out / 10 mV. With the Arduino’s 5 V reference each ADC step is 4.9 mV ≈ 0.5 °C.',
+    typical: ['Thermometer on an Arduino analog pin', 'Over-temperature alarm with an op-amp comparator'],
+  },
+  keywords: 'temperature sensor thermometer lm35',
+};
+
+const tip120: PartDef = {
+  type: 'tip120',
+  name: 'TIP120 Darlington',
+  category: 'Semiconductors',
+  prefix: 'Q',
+  pins: [
+    { name: 'B', dx: 0, dy: 0 },
+    { name: 'C', dx: 1, dy: 0 },
+    { name: 'E', dx: 2, dy: 0 },
+  ],
+  box: { x: -0.6, y: -2.8, w: 3.2, h: 3.2 },
+  defaults: {},
+  props: [],
+  expand(_p, ctx) {
+    const [b, c, e] = [ctx.pin(0), ctx.pin(1), ctx.pin(2)];
+    const mid = ctx.internal('m');
+    return [
+      // output transistor first: its readings represent the part
+      el(ctx, '', 'Q', [c, mid, e], { polarity: 'npn', is: 5e-13, bf: 60, br: 1, maxI: 5, maxP: 2 }),
+      el(ctx, 'q1', 'Q', [c, b, mid], { polarity: 'npn', is: 2e-14, bf: 40, br: 1, maxI: 5, maxP: 0 }),
+      el(ctx, 'r1', 'R', [b, mid], { r: 8000, maxP: 0 }),
+      el(ctx, 'r2', 'R', [mid, e], { r: 120, maxP: 0 }),
+      el(ctx, 'd', 'D', [e, c], { ...DIODE_1N4001, maxI: 0 }),
+    ];
+  },
+  value: () => 'TIP120',
+  info: {
+    summary: 'Two NPN transistors in one package (a Darlington pair): current gain over 1000, up to 5 A.',
+    pinout: ['B : base', 'C : collector (also the metal tab)', 'E : emitter (writing towards you, legs down: B C E)'],
+    specs: [
+      ['Gain hFE', '≥ 1000 (≈2000 in the model)'],
+      ['VBE(on)', '≈1.4 V (two junctions)'],
+      ['VCE(sat)', '≈0.8–2 V: it never saturates as hard as one transistor'],
+      ['Ic max', '5 A, 60 V; 2 W without a heatsink'],
+      ['Built in', 'protection diode emitter → collector'],
+    ],
+    how: 'The first transistor’s emitter current drives the second one’s base, so the gains multiply: Ic ≈ β₁·β₂·Ib. A 1 kΩ resistor from an Arduino pin (≈4 mA) can switch an amp or more. The price is a larger voltage drop: VCE can’t go below about one VBE, so the TIP120 runs warmer than a logic-level MOSFET at high currents.',
+    typical: ['Motor or LED-strip driver from an Arduino', 'Solenoid driver with a flyback diode'],
+  },
+  keywords: 'darlington power transistor tip120',
+};
+
 const ne555: PartDef = {
   type: 'ne555',
   name: '555 timer',
@@ -927,7 +1032,7 @@ const ne555: PartDef = {
 
 // --------------------------------------------------------------------------------------------- digital ICs
 
-function logicChip(type: string, chipId: string, how: string, typical: string[]): PartDef {
+function logicChip(type: string, chipId: string, how: string, typical: string[], extraSpecs: [string, string][] = []): PartDef {
   const chip = CHIPS[chipId];
   return {
     type,
@@ -946,9 +1051,12 @@ function logicChip(type: string, chipId: string, how: string, typical: string[])
       pinout: chip.pins.map((p, i) => `${i + 1} ${p.name}${p.role === 'vcc' ? ' (supply +)' : p.role === 'gnd' ? ' (supply −)' : ''}`),
       specs: [
         ['Supply', chip.family === '4000' ? '3–15 V' : '2–6 V (5 V typical)'],
-        ['Input threshold', '≈ VCC / 2 (with small hysteresis in the model)'],
-        ['Output drive', chip.family === '4000' ? '≈400 Ω' : '≈40 Ω, ±25 mA max'],
+        chip.schmitt
+          ? ['Input thresholds', `Schmitt trigger: rises above ${Math.round(chip.schmitt[1] * 100)} % of VCC, falls below ${Math.round(chip.schmitt[0] * 100)} %`]
+          : ['Input threshold', '≈ VCC / 2 (with small hysteresis in the model)'],
+        ['Output drive', chip.rout ? `≈${chip.rout} Ω` : chip.family === '4000' ? '≈400 Ω' : '≈40 Ω, ±25 mA max'],
         ['Propagation delay', `${formatEng(chip.tpd, 's')} (model)`],
+        ...extraSpecs,
       ],
       how,
       typical,
@@ -972,6 +1080,27 @@ const chipsDefs: PartDef[] = [
   logicChip('ic138', '74HC138', 'Decodes a 3-bit address (A, B, C) to one of eight active-low outputs, when G1 is high and G2A/G2B are low.', ['Memory chip select', 'Running light with a counter']),
   logicChip('ic161', '74HC161', 'Synchronous 4-bit binary counter. Counts on rising CLK when ENP and ENT are high. CLR (active low) resets to 0 immediately; LOAD (active low) loads A–D on the next clock. RCO goes high at 15.', ['Binary counter on LEDs', 'Frequency divider', 'Cascaded counters']),
   logicChip('cd4017', 'CD4017', 'Decade counter with ten decoded outputs: exactly one of Q0–Q9 is high and it advances on each rising CLK (when INH is low). RST high returns to Q0. CO is high for counts 0–4.', ['LED chaser with a 555 clock', 'Traffic-light sequencer', 'Divide-by-N (connect Qn to RST)']),
+  logicChip(
+    'ic7414',
+    '74HC14',
+    'Six inverters with Schmitt-trigger inputs: the output only switches when the input rises above the upper threshold or falls below the lower one. That hysteresis cleans up slow or noisy signals, and with one resistor and one capacitor (R from output to input, C from input to GND) each inverter becomes an oscillator.',
+    ['RC oscillator: f ≈ 1.1 / (R·C)', 'Debouncing a button', 'Squaring up a slow sine wave'],
+    [['RC oscillator', 'f ≈ 1.1 / (R·C) at 5 V']],
+  ),
+  logicChip(
+    'cd4511',
+    'CD4511',
+    'Takes a 4-bit BCD code on A (1), B (2), C (4), D (8) and lights the matching segments a–g of a common-cathode display (through one resistor per segment). LT low lights every segment (lamp test), BI low blanks the display, and LE high freezes the digit shown. Codes 10–15 blank the display.',
+    ['Counter → 4511 → 7-segment display', 'Showing a DIP-switch value as a digit'],
+    [['Display', 'common cathode, outputs source ≈ 25 mA'], ['Pins 3, 4, 5', 'LT and BI to VDD, LE to VSS for normal use']],
+  ),
+  logicChip(
+    'ic283',
+    '74HC283',
+    'Adds two 4-bit numbers A4…A1 and B4…B1 plus a carry-in C0, giving the sum Σ4…Σ1 and a carry-out C4 (the 5th bit). Inside are four full adders with look-ahead carry, so the carry does not have to ripple through every stage.',
+    ['4-bit calculator with DIP switches and LEDs', 'Chaining two for 8 bits (C4 → C0)'],
+    [['Result', 'Σ = A + B + C0 (0…31 with C4)']],
+  ),
 ];
 
 // --------------------------------------------------------------------------------------------- output devices
@@ -1052,6 +1181,148 @@ function ledBar(count: 4 | 8): PartDef {
     },
   };
 }
+
+const rgbLed: PartDef = {
+  type: 'rgbled',
+  name: 'RGB LED',
+  category: 'Output',
+  prefix: 'D',
+  pins: [
+    { name: 'R', dx: 0, dy: 0 },
+    { name: 'K', dx: 1, dy: 0 },
+    { name: 'G', dx: 2, dy: 0 },
+    { name: 'B', dx: 3, dy: 0 },
+  ],
+  box: { x: -0.4, y: -2.2, w: 3.8, h: 2.5 },
+  defaults: {},
+  props: [],
+  expand: (_p, ctx) => [
+    el(ctx, 'r', 'D', [ctx.pin(0), ctx.pin(1)], led('red')),
+    el(ctx, 'g', 'D', [ctx.pin(2), ctx.pin(1)], led('green')),
+    el(ctx, 'b', 'D', [ctx.pin(3), ctx.pin(1)], led('blue')),
+  ],
+  value: () => 'CC',
+  info: {
+    summary: 'Red, green and blue LEDs in one dome with a shared cathode. Mix them to make any colour.',
+    pinout: ['R : red anode', 'K : common cathode (longest leg) → GND', 'G : green anode', 'B : blue anode'],
+    specs: [
+      ['Forward voltage', 'red 1.9 V, green 2.2 V, blue 3.1 V'],
+      ['Current', '5–20 mA per colour, each with its own resistor'],
+    ],
+    how: 'Each colour is a separate LED, so each needs its own resistor (blue needs a smaller one because its forward voltage is higher). Red + green looks yellow, red + blue magenta, green + blue cyan, all three white. With PWM on each anode an Arduino can fade smoothly between colours.',
+    typical: ['Colour mixing with three pots or PWM pins', 'Status light'],
+  },
+  keywords: 'rgb led colour color mixing',
+};
+
+const FUSE_RATINGS = [0.1, 0.25, 0.5, 1, 2];
+const fuse: PartDef = {
+  type: 'fuse',
+  name: 'Fuse',
+  category: 'Passives',
+  prefix: 'F',
+  pins: [
+    { name: '1', dx: 0, dy: 0 },
+    { name: '2', dx: 4, dy: 0 },
+  ],
+  box: { x: 0.5, y: -0.5, w: 3, h: 1 },
+  defaults: { rating: 0.5 },
+  props: [{ key: 'rating', label: 'Rating', kind: 'enum', unit: 'A', options: FUSE_RATINGS.map((a) => ({ value: a, label: formatEng(a, 'A') })) }],
+  expand: (p, ctx) => {
+    const rating = n(p.props.rating, 0.5);
+    return [el(ctx, '', 'fuse', [ctx.pin(0), ctx.pin(1)], { rating, r: 0.1 / rating })];
+  },
+  value: (p) => formatEng(n(p.rating, 0.5), 'A'),
+  info: {
+    summary: 'A thin wire that melts and opens the circuit when too much current flows, protecting the rest.',
+    pinout: ['Either end'],
+    specs: [
+      ['Ratings', '100 mA – 2 A (fast-blow)'],
+      ['Blows', 'in ≈0.1 s at 2× rating, instantly on a short'],
+      ['Holds', 'indefinitely at its rating'],
+      ['Resistance', '≈0.1 Ω / rating (A)'],
+    ],
+    how: 'The fuse wire heats up as I²R. Above its rating it gets hot enough to melt, which breaks the circuit before wires or parts are damaged. Choose a rating a little above the normal current. A blown fuse means something is wrong: find the fault before fitting a new one (tap Repair).',
+    typical: ['Protecting a battery pack from a short', 'In series with a motor or a supply input'],
+  },
+  keywords: 'fuse protection overcurrent short circuit',
+};
+
+const LAMP_TYPES = [
+  { value: '2.5:0.3', label: '2.5 V 0.3 A (torch)' },
+  { value: '6:0.2', label: '6 V 0.2 A' },
+  { value: '12:0.1', label: '12 V 0.1 A' },
+];
+function lampRating(p: Props): { v: number; i: number } {
+  const [v, i] = s(p.type, '6:0.2').split(':').map(Number);
+  return { v: v > 0 ? v : 6, i: i > 0 ? i : 0.2 };
+}
+const lamp: PartDef = {
+  type: 'lamp',
+  name: 'Light bulb',
+  category: 'Output',
+  prefix: 'LP',
+  // legs four holes apart (like a resistor) so the bulb stands between its strips
+  pins: [
+    { name: '1', dx: 0, dy: 0 },
+    { name: '2', dx: 4, dy: 0 },
+  ],
+  box: { x: 0.25, y: -3.5, w: 3.5, h: 3.8 },
+  defaults: { type: '6:0.2' },
+  props: [{ key: 'type', label: 'Bulb', kind: 'enum', options: LAMP_TYPES }],
+  expand(p, ctx) {
+    const r = lampRating(p.props);
+    return [el(ctx, '', 'lamp', [ctx.pin(0), ctx.pin(1)], { vrated: r.v, prated: r.v * r.i })];
+  },
+  value: (p) => {
+    const r = lampRating(p);
+    return `${r.v} V ${formatEng(r.i, 'A')}`;
+  },
+  info: {
+    summary: 'A filament bulb: a tungsten wire heated white-hot by the current through it.',
+    pinout: ['Either terminal'],
+    specs: [
+      ['Hot resistance', 'V² / P (30 Ω for 6 V 0.2 A)'],
+      ['Cold resistance', '≈ 1/10 of the hot value'],
+      ['Current', 'I ∝ V^0.6 (not Ohm’s law!)'],
+      ['Light', '∝ V^3.4: half voltage gives under 10 % of the light'],
+    ],
+    how: 'A bulb is not a fixed resistor: the hotter the filament, the higher its resistance. At switch-on the cold filament draws several times its rated current for a few tens of milliseconds (inrush). Two bulbs in series share the voltage and both glow dimly; in parallel each gets the full voltage. Run well above its rating and the filament burns out.',
+    typical: ['Series vs parallel circuits', 'Seeing a non-linear I–V curve', 'Indicator lamp'],
+  },
+  keywords: 'bulb lamp incandescent filament light',
+};
+
+const servo: PartDef = {
+  type: 'servo',
+  name: 'Servo motor (SG90)',
+  category: 'Output',
+  prefix: 'M',
+  pins: [
+    { name: 'GND', dx: 0, dy: 0 },
+    { name: 'V+', dx: 1, dy: 0 },
+    { name: 'SIG', dx: 2, dy: 0 },
+  ],
+  box: { x: -1, y: -6.4, w: 6.6, h: 6.7 },
+  offBoard: true,
+  defaults: {},
+  props: [],
+  expand: (_p, ctx) => [el(ctx, '', 'servo', [ctx.pin(0), ctx.pin(1), ctx.pin(2)], {})],
+  value: () => 'SG90',
+  info: {
+    summary: 'A small motor with gears and a position sensor that turns to the angle you ask for (0–180°).',
+    pinout: ['GND : brown wire', 'V+ : red wire (4.8–6 V)', 'SIG : orange wire (control pulses)'],
+    specs: [
+      ['Control', 'one pulse every 20 ms (50 Hz)'],
+      ['Pulse width', '1 ms → 0°, 1.5 ms → 90°, 2 ms → 180°'],
+      ['Speed', '≈0.1 s per 60°'],
+      ['Current', '≈5 mA idle, 150 mA+ while moving'],
+    ],
+    how: 'Inside are a DC motor, a gearbox, a potentiometer on the output shaft and a control chip. The chip times each pulse, compares the requested angle with the pot and drives the motor until they match. The SIG pin draws almost no current, so an Arduino pin can drive it directly, but power the servo from 5 V, not from a logic pin.',
+    typical: ['Arduino servo sweep (Timer1 PWM on D9)', 'Pot-controlled pointer or robot arm'],
+  },
+  keywords: 'servo motor sg90 pwm angle',
+};
 
 const buzzer: PartDef = {
   type: 'buzzer',
@@ -1365,14 +1636,20 @@ export const PART_LIST: PartDef[] = [
   lm741,
   lm324,
   lm7805,
+  lm317,
   ne555,
+  tip120,
+  fuse,
   ...chipsDefs,
   ledPart,
+  rgbLed,
   sevenseg,
   ledBar(4),
   ledBar(8),
+  lamp,
   buzzer,
   motor,
+  servo,
   toggle,
   button,
   dipswitch,
@@ -1381,6 +1658,7 @@ export const PART_LIST: PartDef[] = [
   thermistor,
   photodiode,
   potsensor,
+  lm35,
   arduino,
 ];
 

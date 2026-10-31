@@ -11,6 +11,7 @@ export { analyzeTopology } from './diagnostics';
 export { CHIPS } from './digital/chips';
 export type { ChipDef, ChipPin, PinRole } from './digital/chips';
 export { LogicChip } from './digital/logic';
+export { Fuse, Lamp, Servo } from './devices/extra';
 export { ArduinoUno, UNO_PINS } from './avr/arduino';
 export { parseIntelHex, toIntelHex } from './avr/intelhex';
 export { assemble, M328P_SYMBOLS } from './avr/assembler';

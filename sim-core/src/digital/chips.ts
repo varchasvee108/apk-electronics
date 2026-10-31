@@ -18,6 +18,10 @@ export interface ChipDef {
   pins: ChipPin[];
   /** Propagation delay (s). */
   tpd: number;
+  /** Schmitt-trigger inputs: [falling, rising] thresholds as fractions of VCC (default ≈ VCC/2 ± 5 %). */
+  schmitt?: [number, number];
+  /** Output resistance (Ω) when it differs from the family default (40 Ω HC, 400 Ω 4000). */
+  rout?: number;
   init(): Record<string, number>;
   evaluate(inp: boolean[], prev: boolean[], st: Record<string, number>): (boolean | null)[];
 }
@@ -324,6 +328,95 @@ const C4017: ChipDef = {
   },
 };
 
+/** 74HC14: the 7404 pinout with Schmitt-trigger inputs (VT+ ≈ 0.53·VCC, VT− ≈ 0.31·VCC). */
+const C7414: ChipDef = {
+  ...C7404,
+  id: '74HC14',
+  name: '74HC14',
+  title: 'Hex Schmitt-trigger inverter',
+  tpd: 11e-9,
+  schmitt: [0.31, 0.53],
+};
+
+/** Segments a–g lit for each BCD digit (CD4511: "tailless" 6 and 9). */
+const BCD_SEGMENTS = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7c, 0x07, 0x7f, 0x67];
+
+const C4511: ChipDef = {
+  id: 'CD4511',
+  name: 'CD4511',
+  title: 'BCD to 7-segment latch / decoder / driver',
+  family: '4000',
+  tpd: 600e-9,
+  // bipolar source-follower outputs: strong enough to drive LED segments through resistors
+  rout: 60,
+  pins: [
+    P('B', 'in'),
+    P('C', 'in'),
+    P('LT', 'in'),
+    P('BI', 'in'),
+    P('LE', 'in'),
+    P('D', 'in'),
+    P('A', 'in'),
+    P('VSS', 'gnd'),
+    P('e', 'out'),
+    P('d', 'out'),
+    P('c', 'out'),
+    P('b', 'out'),
+    P('a', 'out'),
+    P('g', 'out'),
+    P('f', 'out'),
+    P('VDD', 'vcc'),
+  ],
+  init: () => ({ latch: 0 }),
+  evaluate(inp, _prev, st) {
+    // LE low: transparent; LE high: hold the last code
+    if (!inp[4]) st.latch = (inp[6] ? 1 : 0) | (inp[0] ? 2 : 0) | (inp[1] ? 4 : 0) | (inp[5] ? 8 : 0);
+    const lampTest = !inp[2];
+    const blank = !inp[3];
+    const bits = lampTest ? 0x7f : blank ? 0 : (BCD_SEGMENTS[st.latch] ?? 0);
+    const out: (boolean | null)[] = new Array(16).fill(null);
+    // a b c d e f g → pins 13 12 11 10 9 15 14
+    [12, 11, 10, 9, 8, 14, 13].forEach((pin, k) => (out[pin] = ((bits >> k) & 1) === 1));
+    return out;
+  },
+};
+
+const C283: ChipDef = {
+  id: '74HC283',
+  name: '74HC283',
+  title: '4-bit binary full adder with fast carry',
+  family: 'HC',
+  tpd: 20e-9,
+  pins: [
+    P('Σ2', 'out'),
+    P('B2', 'in'),
+    P('A2', 'in'),
+    P('Σ1', 'out'),
+    P('A1', 'in'),
+    P('B1', 'in'),
+    P('C0', 'in'),
+    P('GND', 'gnd'),
+    P('C4', 'out'),
+    P('Σ4', 'out'),
+    P('B4', 'in'),
+    P('A4', 'in'),
+    P('Σ3', 'out'),
+    P('A3', 'in'),
+    P('B3', 'in'),
+    P('VCC', 'vcc'),
+  ],
+  init: () => ({}),
+  evaluate(inp) {
+    const bit = (i: number) => (inp[i] ? 1 : 0);
+    const a = bit(4) | (bit(2) << 1) | (bit(13) << 2) | (bit(11) << 3);
+    const b = bit(5) | (bit(1) << 1) | (bit(14) << 2) | (bit(10) << 3);
+    const sum = a + b + bit(6);
+    const out: (boolean | null)[] = new Array(16).fill(null);
+    [3, 0, 12, 9, 8].forEach((pin, k) => (out[pin] = ((sum >> k) & 1) === 1));
+    return out;
+  },
+};
+
 export const CHIPS: Record<string, ChipDef> = {
   '7400': quadGate('7400', 'Quad 2-input NAND', (a, b) => !(a && b)),
   '7402': C7402,
@@ -336,4 +429,7 @@ export const CHIPS: Record<string, ChipDef> = {
   '74HC138': C138,
   '74HC161': C161,
   CD4017: C4017,
+  '74HC14': C7414,
+  CD4511: C4511,
+  '74HC283': C283,
 };

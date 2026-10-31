@@ -188,6 +188,9 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
       );
     }
     case 'lm7805':
+    case 'lm317':
+    case 'tip120': {
+      const name = part.type === 'lm7805' ? '7805' : part.type === 'lm317' ? 'LM317' : 'TIP120';
       return (
         <>
           {[0, 1, 2].map((i) => (
@@ -195,10 +198,109 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
           ))}
           <Rect x={-0.5} y={-2.7} width={3} height={1.1} color="#B9BEC6" />
           <Circle cx={1} cy={-2.2} r={0.3} color="#8E959E" />
-          <Rect x={-0.4} y={-1.7} width={2.8} height={1.15} color="#25282D" />
-          <Label x={1} y={-0.95} text="7805" size={0.42} align="center" color="#E9ECEF" bold />
+          <Rect x={-0.4} y={-1.7} width={2.8} height={1.15} color={failed ? '#4A4038' : '#25282D'} />
+          {/* keep the marking readable when the part is turned round */}
+          <Group origin={vec(1, -1.12)} transform={[{ rotate: part.rot === 2 ? Math.PI : 0 }]}>
+            <Label x={1} y={-0.95} text={name} size={name.length > 4 ? 0.36 : 0.42} align="center" color="#E9ECEF" bold />
+          </Group>
+          {(failed || load > 1) && <Smoke clock={clock} x={1} y={-3.2} />}
         </>
       );
+    }
+    case 'lm35':
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0} y2={-0.4} />
+          <Lead x1={1} y1={0} x2={1} y2={-0.4} />
+          <Lead x1={2} y1={0} x2={2} y2={-0.4} />
+          <Path path={P('M-0.35 -0.35 L2.35 -0.35 L2.35 -0.75 A1.35 0.75 0 0 0 -0.35 -0.75 Z')} color={failed ? '#4A4038' : '#26292E'} />
+          <Label x={1} y={-0.7} text="LM35" size={0.36} align="center" color="#E9ECEF" />
+          {failed && <Smoke clock={clock} x={1} y={-1.5} />}
+        </>
+      );
+    case 'rgbled': {
+      const ch = (k: string) => (failed ? 0 : Math.min(1, num(live?.els[k]?.extra?.brightness, 0)));
+      const [r, g, bl] = [ch('r'), ch('g'), ch('b')];
+      const m = Math.max(r, g, bl);
+      const hex = (v: number) => Math.round(255 * Math.min(1, Math.max(0, v))).toString(16).padStart(2, '0');
+      // hue from the channel ratios, intensity from the brightest channel
+      const mix = m > 0.02 ? `#${hex(r / m)}${hex((0.92 * g) / m)}${hex(bl / m)}` : '#E3E7EE';
+      return (
+        <>
+          {[0, 1, 2, 3].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={1.5 + (i - 1.5) * 0.4} y2={-0.65} />
+          ))}
+          <Glow x={1.5} y={-1.3} color={mix} b={m} r={1.8} />
+          <Circle cx={1.5} cy={-1.3} r={0.95} color={m > 0.02 ? alpha(mix, 0.55 + 0.45 * m) : '#E3E7EE'} />
+          <Rect x={0.5} y={-0.7} width={2} height={0.28} color={alpha('#FFFFFF', 0.7)} />
+          <Circle cx={1.2} cy={-1.62} r={0.22} color={alpha('#FFFFFF', 0.6 + 0.3 * m)} />
+          {failed && <Stroke d="M0.9 -1.9 L2.1 -0.7 M2.1 -1.9 L0.9 -0.7" color="#2A2A2A" w={0.12} />}
+        </>
+      );
+    }
+    case 'fuse':
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0.7} y2={0} />
+          <Lead x1={3.3} y1={0} x2={4} y2={0} />
+          <RoundedRect x={0.95} y={-0.38} width={2.1} height={0.76} r={0.3} color="#E2EAF2" />
+          <Rect x={0.6} y={-0.42} width={0.45} height={0.84} color="#C3C8CF" />
+          <Rect x={2.95} y={-0.42} width={0.45} height={0.84} color="#C3C8CF" />
+          {failed ? (
+            <>
+              <Circle cx={2} cy={0} r={0.32} color={alpha('#3A3A3A', 0.45)} />
+              <Stroke d="M1.05 0 L1.65 0.06 M2.35 -0.06 L2.95 0" color="#6B6F76" w={0.05} />
+            </>
+          ) : (
+            <Stroke d="M1.05 0 L2.95 0" color={load > 1 ? '#FF7A3D' : '#7A7F87'} w={0.05} />
+          )}
+          <Label x={2} y={-0.55} text={formatEng(num(p.rating, 0.5), 'A')} size={0.32} align="center" color={C.ink3} />
+        </>
+      );
+    case 'lamp': {
+      const b = failed ? 0 : num(live?.extra.brightness, 0);
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0.7} y2={-0.55} />
+          <Lead x1={4} y1={0} x2={3.3} y2={-0.55} />
+          <RoundedRect x={0.45} y={-1.05} width={3.1} height={0.85} r={0.15} color="#3A3E44" />
+          <Rect x={1.3} y={-1.6} width={1.4} height={0.6} color="#B9BEC6" />
+          <Glow x={2} y={-2.5} color="#FFC94D" b={b} r={1.9} />
+          <Circle cx={2} cy={-2.5} r={0.98} color={b > 0.03 ? alpha('#FFF1C9', 0.6 + 0.4 * Math.min(1, b)) : alpha('#E3E9F0', 0.95)} />
+          <Stroke d="M1.65 -1.6 L1.7 -2.45 M2.35 -1.6 L2.3 -2.45" color="#8A8F96" w={0.05} />
+          <Stroke
+            d={failed ? 'M1.7 -2.45 L1.85 -2.68 M2.15 -2.68 L2.3 -2.45' : 'M1.7 -2.45 L1.82 -2.7 L1.94 -2.45 L2.06 -2.7 L2.18 -2.45 L2.3 -2.45'}
+            color={b > 0.05 ? '#FF9F1C' : '#6B6F76'}
+            w={0.07}
+          />
+          {failed && <Smoke clock={clock} x={2} y={-3.8} />}
+        </>
+      );
+    }
+    case 'servo': {
+      const ang = num(live?.extra.angle, 0);
+      const a = (ang * Math.PI) / 180;
+      const cx = 3.4;
+      const cy = -3.6;
+      return (
+        <>
+          <Line p1={vec(0, 0)} p2={vec(0.5, -1.3)} color="#7A4A2A" strokeWidth={0.16} strokeCap="round" />
+          <Line p1={vec(1, 0)} p2={vec(0.8, -1.3)} color="#D23B2E" strokeWidth={0.16} strokeCap="round" />
+          <Line p1={vec(2, 0)} p2={vec(1.1, -1.3)} color="#F08C1E" strokeWidth={0.16} strokeCap="round" />
+          <RoundedRect x={-0.8} y={-5.6} width={6.2} height={4.3} r={0.3} color={failed ? '#3E4A5E' : '#2D5DA8'} />
+          <Rect x={-1} y={-4.1} width={6.6} height={0.5} color="#244C8A" />
+          <Circle cx={cx} cy={cy} r={0.85} color="#E8EAEE" />
+          <Group transform={[{ translateX: cx }, { translateY: cy }, { rotate: -a }]}>
+            <RoundedRect x={-0.35} y={-0.3} width={2.5} height={0.6} r={0.3} color="#F7F8FA" />
+            <Circle cx={1.85} cy={0} r={0.1} color="#9AA1AB" />
+          </Group>
+          <Circle cx={cx} cy={cy} r={0.3} color="#C3C8CF" />
+          <Label x={0.9} y={-2.0} text={`${Math.round(ang)}°`} size={0.55} align="center" color="#FFFFFF" bold />
+          <Label x={0.9} y={-4.75} text="SG90" size={0.42} align="center" color="#DCE6FA" bold />
+          {failed && <Smoke clock={clock} x={2.3} y={-6} />}
+        </>
+      );
+    }
     case 'pot':
     case 'potsensor': {
       const pos = num(p.pos, 0.5);
@@ -630,6 +732,23 @@ function SchBody({ part, live }: { part: PartInstance; live: PartLive | null }) 
       );
     case 'inductor':
       return twoTerm(4, <Stroke d="M0 0 A0.2 0.2 0 0 1 0.4 0 A0.2 0.2 0 0 1 0.8 0 A0.2 0.2 0 0 1 1.2 0 A0.2 0.2 0 0 1 1.6 0" />);
+    case 'fuse':
+      return twoTerm(
+        4,
+        <Stroke d={`M0 0 L0.2 0 M0.2 -0.25 L1.4 -0.25 L1.4 0.25 L0.2 0.25 Z ${failed ? 'M0.2 0 L0.65 0 M0.95 0 L1.4 0' : 'M0.2 0 L1.4 0'} M1.4 0 L1.6 0`} color={failed ? C.danger : INK} />,
+      );
+    case 'lamp': {
+      const b = failed ? 0 : num(live?.extra.brightness, 0);
+      return twoTerm(
+        4,
+        <>
+          <Glow x={0.8} y={0} color="#FFC94D" b={b} r={0.9} />
+          <Circle cx={0.8} cy={0} r={0.6} color={C.surface} />
+          <Circle cx={0.8} cy={0} r={0.6} color={INK} style="stroke" strokeWidth={SW} />
+          <Stroke d="M0 0 L0.2 0 M1.4 0 L1.6 0 M0.38 -0.42 L1.22 0.42 M0.38 0.42 L1.22 -0.42" />
+        </>,
+      );
+    }
     case 'diode':
       return twoTerm(4, diodeSym('M1.1 -0.4 L1.1 0.4'));
     case 'zener':

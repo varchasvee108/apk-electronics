@@ -44,7 +44,13 @@ export class LogicChip extends Device {
   }
 
   get rout(): number {
-    return this.def.family === '4000' ? 400 : 40;
+    return this.def.rout ?? (this.def.family === '4000' ? 400 : 40);
+  }
+  /** Input threshold (V) for a pin currently at `cur`: Schmitt chips have wide hysteresis. */
+  private threshold(vs: number, cur: boolean): number {
+    const sc = this.def.schmitt;
+    if (sc) return (cur ? sc[0] : sc[1]) * vs;
+    return vs / 2 + (cur ? -0.05 : 0.05) * vs;
   }
   get vmin(): number {
     return this.def.family === '4000' ? 3 : 2;
@@ -77,10 +83,7 @@ export class LogicChip extends Device {
   private level(x: Float64Array, i: number, prev: boolean): boolean {
     const vs = this.supply(x);
     const v = this.pv(x, i) - this.pv(x, this.gndIdx);
-    const th = vs / 2;
-    const h = 0.05 * vs;
-    if (prev) return v > th - h;
-    return v > th + h;
+    return v > this.threshold(vs, prev);
   }
 
   private sampleInputs(x: Float64Array): boolean {
@@ -184,8 +187,8 @@ export class LogicChip extends Device {
       const cur = this.inLv[i];
       const vsO = this.supply(xOld);
       const vsN = this.supply(xNew);
-      const thO = vsO / 2 + (cur ? -0.05 : 0.05) * vsO;
-      const thN = vsN / 2 + (cur ? -0.05 : 0.05) * vsN;
+      const thO = this.threshold(vsO, cur);
+      const thN = this.threshold(vsN, cur);
       const a = this.pv(xOld, i) - this.pv(xOld, this.gndIdx) - thO;
       const b = this.pv(xNew, i) - this.pv(xNew, this.gndIdx) - thN;
       if ((cur && a > 0 && b < 0) || (!cur && a < 0 && b > 0)) f = Math.min(f, a / (a - b));

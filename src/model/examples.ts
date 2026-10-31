@@ -16,6 +16,22 @@ export function arduinoProgram(id: string): { hex: string; program: string; sour
   return { hex: assemble(p.asm).hex, program: p.id, source: p.asm };
 }
 
+/**
+ * Uno below the breadboard driving a servo on the right: the servo has its own 5 V supply on the rails
+ * (common ground with the Uno), and pin 9 reaches it through the breadboard.
+ */
+export function servoOnBreadboard(b: DocBuilder, program: string): void {
+  addRails(b, { supply: true, v: 5, bottom: true });
+  b.part('arduino', { x: 20, y: 28 }, { props: arduinoProgram(program), id: 'uno' });
+  b.wire(railNear('bottom', '-', 28), { x: 29, y: 28 }, WIRE.black); // common ground
+  b.wire({ x: 34, y: 28 }, 'j33', WIRE.orange); // D9
+  b.wire('i33', 'i58', WIRE.orange);
+  b.part('servo', { x: 70, y: 16 }, { id: 'sv1' });
+  b.wire({ x: 70, y: 16 }, railNear('bottom', '-', 58), WIRE.black);
+  b.wire({ x: 71, y: 16 }, railNear('bottom', '+', 59), WIRE.red);
+  b.wire({ x: 72, y: 16 }, 'j58', WIRE.orange);
+}
+
 /** 555 astable on the breadboard with pin 1 in column `col`; returns the OUT strip column. */
 export function astable555(b: DocBuilder, col: number, opts: { r1?: number; r2?: number; c?: number; led?: boolean } = {}): number {
   const u = b.part('ne555', `e${col}`, { id: 'u555' });
@@ -353,6 +369,18 @@ export const EXAMPLES: Example[] = [
       b.wire({ x: 38, y: 52 }, { x: 33, y: 47 }, WIRE.red); // 5V
       b.wire({ x: 37, y: 52 }, { x: 38, y: 47 }, WIRE.yellow); // A0
       b.part('ground', { x: 35, y: 47 }, { id: 'gnd' });
+      return b.build('example');
+    },
+  },
+  {
+    id: 'servo-sweep',
+    title: 'Servo sweep',
+    summary: 'Timer1 on the Uno makes a 50 Hz pulse train on pin 9 whose width sweeps 1 → 2 ms; the servo follows 0 → 180° and back. Put CH1 on j33 to watch the pulses.',
+    tags: ['Arduino', 'PWM', 'servo'],
+    build() {
+      const b = new DocBuilder('Servo sweep');
+      servoOnBreadboard(b, 'servo-sweep');
+      b.probe('ch1', 'h33');
       return b.build('example');
     },
   },

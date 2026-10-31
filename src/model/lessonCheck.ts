@@ -12,9 +12,11 @@ export interface CheckMemory {
   seen: Set<string>;
   darkOn: boolean;
   brightOff: boolean;
+  /** Parts seen damaged / blown at some point. */
+  failedSeen: Set<string>;
 }
 
-export const newMemory = (): CheckMemory => ({ blinks: {}, patterns: {}, seen: new Set(), darkOn: false, brightOff: false });
+export const newMemory = (): CheckMemory => ({ blinks: {}, patterns: {}, seen: new Set(), darkOn: false, brightOff: false, failedSeen: new Set() });
 
 export interface CheckContext {
   doc: CircuitDoc;
@@ -54,6 +56,8 @@ export function remember(checks: Check[], ctx: CheckContext): void {
       (mem.patterns[key] ??= new Set()).add(c.parts.map((p) => (lit(snap, p) ? '1' : '0')).join(''));
     } else if (c.kind === 'seenAll') {
       for (const p of c.parts) if (lit(snap, p)) mem.seen.add(p);
+    } else if (c.kind === 'wasFailed') {
+      if (snap.parts[c.part]?.failed) mem.failedSeen.add(c.part);
     } else if (c.kind === 'nightLight') {
       const ldrs = doc.parts.filter((p) => p.type === 'ldr');
       const leds = doc.parts.filter((p) => p.type === 'led');
@@ -191,6 +195,16 @@ export function evaluate(c: Check, ctx: CheckContext): CheckResult {
         ok: mem.darkOn && mem.brightOff,
         detail: `${mem.darkOn ? '✓' : '·'} on when dark   ${mem.brightOff ? '✓' : '·'} off when bright`,
       };
+    case 'extra': {
+      if (!snap) return need();
+      const live = snap.parts[c.part];
+      const v = Number(live?.extra?.[c.key] ?? NaN);
+      return { ok: Number.isFinite(v) && inRange(v, c.min, c.max), detail: Number.isFinite(v) ? `${Math.round(v * 100) / 100}${c.unit ?? ''}` : '—' };
+    }
+    case 'wasFailed': {
+      const seen = mem.failedSeen.has(c.part);
+      return { ok: seen, detail: seen ? 'yes' : 'not yet' };
+    }
     case 'hasPart': {
       const n = doc.parts.filter((p) => p.type === c.type).length;
       return { ok: n >= (c.count ?? 1), detail: `${n} placed` };

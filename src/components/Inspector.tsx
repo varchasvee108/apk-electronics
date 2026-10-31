@@ -138,9 +138,19 @@ function PartInspector({ part }: { part: PartInstance }) {
         <Card style={{ marginTop: S.md }}>
           {live.failed ? (
             <>
-              <Badge text={`Damaged (${live.failReason})`} tone="danger" />
-              <Text style={[T.small, { marginVertical: S.sm }]}>Fix the cause first (add a resistor, lower the voltage, flip the polarity), then replace the part.</Text>
-              <Button icon="construct-outline" label="Repair part" kind="primary" onPress={() => controller.repair(part.id)} />
+              {part.type === 'fuse' ? (
+                <>
+                  <Badge text="Blown" tone="danger" />
+                  <Text style={[T.small, { marginVertical: S.sm }]}>The fuse did its job and opened the circuit. Remove the short or overload first, then fit a new fuse.</Text>
+                  <Button icon="construct-outline" label="Replace fuse" kind="primary" onPress={() => controller.repair(part.id)} />
+                </>
+              ) : (
+                <>
+                  <Badge text={`Damaged (${live.failReason})`} tone="danger" />
+                  <Text style={[T.small, { marginVertical: S.sm }]}>Fix the cause first (add a resistor, lower the voltage, flip the polarity), then replace the part.</Text>
+                  <Button icon="construct-outline" label="Repair part" kind="primary" onPress={() => controller.repair(part.id)} />
+                </>
+              )}
             </>
           ) : (
             <>

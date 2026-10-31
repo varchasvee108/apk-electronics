@@ -23,6 +23,31 @@ const TIMER1_CTC = (ticks: number) => `    ; Timer1 in CTC mode, clk/256 → 62.
     ldi r16, (1<<WGM12)|(1<<CS12)
     sts TCCR1B, r16`;
 
+const SERVO_TIMER1 = `    ; Timer1 fast PWM, mode 14 (TOP = ICR1), clear OC1A (pin 9) on compare match
+    ; 16 MHz / 8 = 2 MHz → 0.5 µs per tick; ICR1 = 39999 → one pulse every 20 ms (50 Hz)
+    sbi DDRB, PB1
+    ldi r16, high(39999)
+    sts ICR1H, r16
+    ldi r16, low(39999)
+    sts ICR1L, r16
+    ldi r16, (1<<COM1A1)|(1<<WGM11)
+    sts TCCR1A, r16
+    ldi r16, (1<<WGM13)|(1<<WGM12)|(1<<CS11)
+    sts TCCR1B, r16`;
+
+const SERVO_SUBS = `; OCR1A = r25:r24 ticks (2000 = 1 ms = 0°, 4000 = 2 ms = 180°); write the high byte first
+set_pulse:
+    sts OCR1AH, r25
+    sts OCR1AL, r24
+    ret
+
+; wait for the end of the current 20 ms period (TOV1 is set at TOP)
+wait_period:
+    sbis TIFR1, TOV1
+    rjmp wait_period
+    sbi TIFR1, TOV1
+    ret`;
+
 const STACK = `    ldi r16, low(RAMEND)
     out SPL, r16
     ldi r16, high(RAMEND)
@@ -328,6 +353,105 @@ wait_ticks:
     dec r22
     brne wait_ticks
     ret
+`,
+  },
+  {
+    id: 'servo-sweep',
+    title: 'Servo Sweep',
+    summary: 'Sweeps a servo on pin 9 from 0° to 180° and back, using Timer1 to make the 50 Hz control pulses.',
+    wiring: 'Servo SIG (orange) to D9, V+ (red) to 5 V, GND (brown) to GND.',
+    cpp: `#include <Servo.h>
+
+Servo servo;
+
+void setup() {
+  servo.attach(9);
+}
+
+void loop() {
+  for (int a = 0; a <= 180; a += 2) { servo.write(a); delay(20); }
+  for (int a = 180; a >= 0; a -= 2) { servo.write(a); delay(20); }
+}`,
+    asm: `; Servo sweep: pulse width 1 → 2 ms → 1 ms in 10 µs (≈1.8°) steps, one step per 20 ms period
+.org 0
+${STACK}
+${SERVO_TIMER1}
+    ldi r24, low(2000)
+    ldi r25, high(2000)
+    rcall set_pulse
+    ldi r22, 0               ; direction: 0 = up, 1 = down
+loop:
+    rcall wait_period
+    tst r22
+    brne down
+    adiw r24, 20
+    ldi r16, high(4000)
+    cpi r24, low(4000)
+    cpc r25, r16
+    brlo apply
+    ldi r22, 1               ; reached 2 ms (180°): turn round
+    rjmp apply
+down:
+    sbiw r24, 20
+    ldi r16, high(2001)
+    cpi r24, low(2001)
+    cpc r25, r16
+    brsh apply
+    ldi r22, 0               ; back at 1 ms (0°)
+apply:
+    rcall set_pulse
+    rjmp loop
+
+${SERVO_SUBS}
+`,
+  },
+  {
+    id: 'servo-knob',
+    title: 'Servo Knob',
+    summary: 'A potentiometer on A0 sets the servo angle on pin 9 (0–1023 → 1–2 ms pulses).',
+    wiring: 'Pot: ends to 5V and GND, wiper to A0. Servo SIG to D9, V+ to 5 V, GND to GND.',
+    cpp: `#include <Servo.h>
+
+Servo servo;
+
+void setup() {
+  servo.attach(9);
+}
+
+void loop() {
+  int value = analogRead(A0);
+  servo.write(map(value, 0, 1023, 0, 180));
+  delay(20);
+}`,
+    asm: `; Servo knob: ADC0 → OCR1A = 2000 + 2 × reading (1 ms … ≈2 ms), refreshed every 20 ms
+.org 0
+${STACK}
+${SERVO_TIMER1}
+    ldi r16, (1<<REFS0)      ; AVcc reference, channel A0
+    sts ADMUX, r16
+    ldi r16, (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0)
+    sts ADCSRA, r16
+    ldi r18, low(2000)
+    ldi r19, high(2000)
+loop:
+    lds r16, ADCSRA
+    ori r16, (1<<ADSC)       ; start a conversion
+    sts ADCSRA, r16
+adc_wait:
+    lds r16, ADCSRA
+    sbrc r16, ADSC
+    rjmp adc_wait
+    lds r24, ADCL            ; read low byte first
+    lds r25, ADCH
+    lsl r24                  ; × 2
+    rol r25
+    add r24, r18             ; + 2000
+    adc r25, r19
+    rcall set_pulse
+    rcall wait_period
+    rjmp loop
+
+${SERVO_SUBS}
 `,
   },
 ];
