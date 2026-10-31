@@ -18,7 +18,7 @@ Every native module Bench uses (Skia, Reanimated, Gesture Handler, SQLite, file 
 Quality gates:
 
 ```bash
-npm test               # 179 Jest tests: solver vs analytic answers, AVR, netlists, examples, every lesson solved by script
+npm test               # 240 Jest tests: solver vs analytic answers, AVR, netlists, examples, every lesson solved by script
 npm run typecheck      # app + sim-core, TypeScript strict
 npx eslint src sim-core/src
 npx expo-doctor
@@ -42,7 +42,7 @@ npx expo-doctor
 
 ## Arduino: how compilation works
 
-Bench runs real ATmega328P machine code in avr8js, but it **cannot compile C++ on the device**, because that needs avr-gcc. The six starter programs are hand-written AVR assembly equivalents of the classic sketches, and Bench assembles them on the device. You can edit and re-assemble them. To run your own C++, export a `.hex` from the Arduino IDE (Sketch → Export Compiled Binary) and import it, or paste its text.
+Bench runs real ATmega328P machine code in avr8js, but it **cannot compile C++ on the device**, because that needs avr-gcc. The eight starter programs (Blink, Button, Fade, Analog Read, Serial Echo, Traffic Light, Servo Sweep, Servo Knob) are hand-written AVR assembly equivalents of the classic sketches, and Bench assembles them on the device. You can edit and re-assemble them. To run your own C++, export a `.hex` from the Arduino IDE (Sketch → Export Compiled Binary) and import it, or paste its text.
 
 ## Disclaimer
 

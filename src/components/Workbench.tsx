@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { create } from 'zustand';
 import type { Diagnostic } from '@sim/types';
 import { formatEng } from '@sim/units';
 import { BenchCanvas, type CanvasApi } from '@/canvas/BenchCanvas';
@@ -43,6 +44,14 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   const selection = useCircuit((s) => s.selection);
   const view = useCircuit((s) => s.view);
   const [tab, setTab] = useState<PanelTab>(lesson ? 'lesson' : wide ? 'inspect' : 'parts');
+  // evaluated here, not in the lesson tab, so time-based checks keep counting while another tab is open
+  const lessonDone = useLessonStore((s) => s.done);
+  // show the success message as soon as the goal is reached, whichever tab is open
+  const [shownDone, setShownDone] = useState(false);
+  if (lessonDone !== shownDone) {
+    setShownDone(lessonDone);
+    if (lessonDone && lesson) setTab('lesson');
+  }
   const [instTab, setInstTab] = useState<InstrumentTab>('meter');
   const [showParts, setShowParts] = useState(true);
   const [showVoltage, setShowVoltage] = useState(false);
@@ -88,8 +97,9 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   const [lastSel, setLastSel] = useState(selection);
   if (lastSel !== selection) {
     setLastSel(selection);
-    // show the settings of whatever was just selected (the lesson stays one tap away)
-    if (selection.parts.length || selection.wires.length) setTab('inspect');
+    // show the settings of whatever was just selected (the lesson stays one tap away); an open
+    // instrument stays put so its readings (or the I–V tracer's part choice) aren't yanked away
+    if ((selection.parts.length || selection.wires.length) && tab !== 'instruments') setTab('inspect');
   }
 
   const onReady = useCallback((a: CanvasApi) => {
@@ -123,6 +133,7 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
         {tab === 'parts' && <PartsTray center={center} onAdded={() => setTab('inspect')} />}
         {tab === 'inspect' && <Inspector />}
         {tab === 'instruments' && <Instruments tab={instTab} setTab={setInstTab} />}
+        {lesson && <LessonTracker lesson={lesson} />}
         {tab === 'lesson' && lesson && <LessonPanel lesson={lesson} />}
       </View>
     </View>
@@ -544,29 +555,45 @@ function NetlistView() {
 
 // ------------------------------------------------------------------ lesson panel
 
-function LessonPanel({ lesson }: { lesson: Lesson }) {
+interface LessonState {
+  results: CheckResult[];
+  done: boolean;
+}
+
+const useLessonStore = create<LessonState>(() => ({ results: [], done: false }));
+
+/**
+ * Runs a lesson's checks on every snapshot and remembers time-based events (blinks, a blown fuse…).
+ * Always mounted, so nothing is missed while the inspector or instruments tab is open.
+ */
+function LessonTracker({ lesson }: { lesson: Lesson }) {
   const doc = useCircuit((s) => s.doc);
   const snap = useSim((s) => s.snapshot);
   const ex = useSim((s) => s.ex);
-  const [hints, setHints] = useState(0);
-  const [done, setDone] = useState(false);
   const mem = useRef<CheckMemory>(newMemory());
-  const [results, setResults] = useState<CheckResult[]>([]);
   // the lesson screen remounts the workbench per lesson (key), so state starts fresh
   useEffect(() => {
     mem.current = newMemory();
+    useLessonStore.setState({ results: [], done: false });
     setProgress(lesson.id, 'started');
-  }, [lesson.id]);
+  }, [lesson]);
   useEffect(() => {
     const ctx = { doc, snap, ex, mem: mem.current, trace: controller.trace, serial: (id: string) => controller.serialText(id) };
     remember(lesson.checks, ctx);
-    const r = lesson.checks.map((c) => evaluate(c, ctx));
-    setResults(r);
-    if (!done && snap && r.every((x) => x.ok)) {
-      setDone(true);
-      setProgress(lesson.id, 'done');
-    }
-  }, [doc, snap, ex, lesson, done]);
+    const results = lesson.checks.map((c) => evaluate(c, ctx));
+    const wasDone = useLessonStore.getState().done;
+    const done = wasDone || (!!snap && results.every((x) => x.ok));
+    if (done && !wasDone) setProgress(lesson.id, 'done');
+    useLessonStore.setState({ results, done });
+  }, [doc, snap, ex, lesson]);
+  return null;
+}
+
+function LessonPanel({ lesson }: { lesson: Lesson }) {
+  const snap = useSim((s) => s.snapshot);
+  const [hints, setHints] = useState(0);
+  const results = useLessonStore((s) => s.results);
+  const done = useLessonStore((s) => s.done);
   const idx = LESSONS.findIndex((l) => l.id === lesson.id);
   const next = idx >= 0 ? LESSONS[idx + 1] : undefined;
   return (

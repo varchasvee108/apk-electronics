@@ -1,6 +1,6 @@
 import { Device, type Ratings } from '../device';
 import type { Stamper } from '../stamper';
-import type { DeviceReading, ElementSpec } from '../types';
+import type { DeviceReading } from '../types';
 
 const OPEN_G = 1e-10;
 

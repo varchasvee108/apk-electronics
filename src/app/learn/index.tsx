@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, Button, Icon } from '@/components/ui';
 import { confirm } from '@/lib/dialog';
 import { LESSONS, UNITS } from '@/model/lessons';
+import { QUIZZES, quizId } from '@/model/quizzes';
 import { getProgress, resetProgress, type LessonStatus } from '@/store/db';
 import { C, R, S, T } from '@/theme';
 
@@ -46,6 +47,23 @@ export default function LearnScreen() {
                 </Pressable>
               );
             })}
+            {QUIZZES[u.id] && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Quiz: ${u.title}`}
+                onPress={() => router.push(`/quiz/${u.id}`)}
+                style={({ pressed }) => [styles.lesson, pressed && { backgroundColor: C.sunken }]}
+              >
+                <Icon name={progress[quizId(u.id)] === 'done' ? 'checkmark-circle' : 'help-circle-outline'} color={progress[quizId(u.id)] === 'done' ? C.ok : C.info} />
+                <View style={{ flex: 1 }}>
+                  <Text style={T.body}>Quick quiz</Text>
+                  <Text style={T.caption} numberOfLines={1}>
+                    {QUIZZES[u.id].length} questions to check you’ve got it
+                  </Text>
+                </View>
+                {progress[quizId(u.id)] === 'done' ? <Badge text="Passed" tone="ok" /> : <Text style={T.caption}>1 min</Text>}
+              </Pressable>
+            )}
           </View>
         );
       })}

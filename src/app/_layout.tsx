@@ -28,6 +28,7 @@ export default function RootLayout() {
           <Stack.Screen name="bench/[id]" options={{ headerShown: false }} />
           <Stack.Screen name="learn/[id]" options={{ headerShown: false }} />
           <Stack.Screen name="learn/index" options={{ title: 'Learn' }} />
+          <Stack.Screen name="quiz/[unit]" options={{ title: 'Quiz' }} />
           <Stack.Screen name="challenges" options={{ title: 'Challenges' }} />
           <Stack.Screen name="examples" options={{ title: 'Example circuits' }} />
           <Stack.Screen name="circuits" options={{ title: 'My circuits' }} />
