@@ -98,6 +98,14 @@ function carryWires(d: CircuitDoc, before: Map<string, Pt[]>): void {
   }
   d.wires = d.wires.filter((w) => !samePt(w.a, w.b));
 }
+
+/** Selection restricted to items that still exist (undo should not close the inspector needlessly). */
+function keepSelection(sel: Selection, d: CircuitDoc): Selection {
+  const parts = new Set(d.parts.map((p) => p.id));
+  const wires = new Set(d.wires.map((w) => w.id));
+  return { parts: sel.parts.filter((id) => parts.has(id)), wires: sel.wires.filter((id) => wires.has(id)) };
+}
+
 const HISTORY = 100;
 
 export const useCircuit = create<CircuitState>((set, get) => ({
@@ -154,13 +162,13 @@ export const useCircuit = create<CircuitState>((set, get) => ({
     const { past, doc, future } = get();
     if (!past.length) return;
     const prev = past[past.length - 1];
-    set({ doc: prev, past: past.slice(0, -1), future: [doc, ...future], lastKey: null, dirty: true, selection: { parts: [], wires: [] } });
+    set({ doc: prev, past: past.slice(0, -1), future: [doc, ...future], lastKey: null, dirty: true, selection: keepSelection(get().selection, prev) });
   },
 
   redo() {
     const { past, doc, future } = get();
     if (!future.length) return;
-    set({ doc: future[0], past: [...past, doc], future: future.slice(1), lastKey: null, dirty: true, selection: { parts: [], wires: [] } });
+    set({ doc: future[0], past: [...past, doc], future: future.slice(1), lastKey: null, dirty: true, selection: keepSelection(get().selection, future[0]) });
   },
 
   select(sel, add) {

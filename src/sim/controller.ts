@@ -440,17 +440,29 @@ class SimController {
   }
 
   /** Bode sweep from a function generator / AC source to the CH1 probe. */
-  bode(doc: CircuitDoc, opts: { fStart: number; fStop: number }): { freqs: number[]; db: number[]; phase: number[]; input: string; output: string } {
+  /**
+   * Small-signal sweep from the generator to a scope probe. With no channel given, the first placed
+   * scope probe that is not sitting on the generator output itself is plotted (CH1 is often the input).
+   */
+  bode(
+    doc: CircuitDoc,
+    opts: { fStart: number; fStop: number; channel?: ProbeKind },
+  ): { freqs: number[]; db: number[]; phase: number[]; input: string; output: string; channel: ProbeKind } {
     const src = doc.parts.find((p) => p.type === 'funcgen' || p.type === 'acsource');
     if (!src) throw new Error('Add a function generator (or AC source) to drive the circuit.');
-    const out = doc.probes.ch1;
-    if (!out) throw new Error('Place the CH1 scope probe on the output you want to plot.');
     const ex = extractNetlist(doc);
-    const sim = new Simulator(ex.netlist, { failures: false });
-    const res = sim.acSweep({ fStart: opts.fStart, fStop: opts.fStop, pointsPerDecade: 30, sourceId: src.id });
-    const outNode = ex.nodeOf.get(ptKey(out)) ?? 0;
     const inPin = pinPositions(src)[0];
     const inNode = ex.nodeOf.get(ptKey(inPin)) ?? 0;
+    const nodeOfProbe = (k: ProbeKind) => {
+      const pt = doc.probes[k];
+      return pt ? ex.nodeOf.get(ptKey(pt)) ?? 0 : -1;
+    };
+    const placed = SCOPE_CHANNELS.filter((k) => doc.probes[k]);
+    const channel = opts.channel && doc.probes[opts.channel] ? opts.channel : placed.find((k) => nodeOfProbe(k) !== inNode) ?? placed[0];
+    if (!channel) throw new Error('Place a scope probe (CH1–CH4) on the output you want to plot.');
+    const outNode = nodeOfProbe(channel);
+    const sim = new Simulator(ex.netlist, { failures: false });
+    const res = sim.acSweep({ fStart: opts.fStart, fStop: opts.fStop, pointsPerDecade: 30, sourceId: src.id });
     const name = (n: number) => ex.netlist.nodeNames[n];
     const ho = sim.acNode(res, name(outNode));
     const hi = sim.acNode(res, name(inNode));
@@ -461,7 +473,7 @@ class SimController {
       while (d < -180) d += 360;
       return d;
     });
-    return { freqs: res.freqs, db, phase, input: name(inNode), output: name(outNode) };
+    return { freqs: res.freqs, db, phase, input: name(inNode), output: name(outNode), channel };
   }
 
   nodeName(n: number): string {

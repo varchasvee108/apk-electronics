@@ -469,12 +469,14 @@ function Bode() {
   const doc = useCircuit((s) => s.doc);
   const [fStart, setFStart] = useState(10);
   const [fStop, setFStop] = useState(1e6);
+  const [channel, setChannel] = useState<ProbeKind | undefined>(undefined);
   const [res, setRes] = useState<ReturnType<typeof controller.bode> | null>(null);
   const [err, setErr] = useState('');
+  const placed = SCOPE_CHANNELS.filter((k) => doc.probes[k]);
   const run = () => {
     try {
       setErr('');
-      setRes(controller.bode(doc, { fStart, fStop }));
+      setRes(controller.bode(doc, { fStart, fStop, channel }));
     } catch (e) {
       setRes(null);
       setErr(e instanceof Error ? e.message : String(e));
@@ -492,15 +494,25 @@ function Bode() {
   const minDb = res ? Math.floor(Math.min(...res.db) / 20) * 20 : -60;
   const maxDb = res ? Math.ceil(Math.max(...res.db) / 20) * 20 + 0.0001 : 20;
   const f3 = res ? (() => {
-    const ref = res.db[0];
-    const k = res.db.findIndex((d) => d < ref - 3);
-    return k > 0 ? res.freqs[k] : null;
+    // first crossing of (start gain − 3 dB), interpolated in log-frequency between sweep points
+    const target = res.db[0] - 3;
+    const k = res.db.findIndex((d) => d < target);
+    if (k <= 0) return null;
+    const u = (res.db[k - 1] - target) / (res.db[k - 1] - res.db[k]);
+    return 10 ** (Math.log10(res.freqs[k - 1]) + u * (Math.log10(res.freqs[k]) - Math.log10(res.freqs[k - 1])));
   })() : null;
   return (
     <>
       <Text style={T.small}>
-        Sweeps the function generator (1 V small-signal) and plots CH1 relative to the generator output. Works with the power off: it uses the DC operating point.
+        Sweeps the function generator (1 V small-signal) and plots a scope probe relative to the generator output. Auto picks the first probe that is not on the
+        generator itself. Works with the power off: it uses the DC operating point.
       </Text>
+      <View style={[styles.row, { marginTop: S.sm }]}>
+        <Chip label="Output: auto" active={!channel} onPress={() => setChannel(undefined)} />
+        {placed.map((k) => (
+          <Chip key={k} label={k.toUpperCase()} active={channel === k} onPress={() => setChannel(k)} />
+        ))}
+      </View>
       <View style={[styles.row, { marginTop: S.sm }]}>
         {[1, 10, 100].map((f) => (
           <Chip key={f} label={`from ${formatEng(f, 'Hz')}`} active={fStart === f} onPress={() => setFStart(f)} />
@@ -513,7 +525,9 @@ function Bode() {
       {!!err && <Text style={[T.small, { color: C.danger, marginTop: S.sm }]}>{err}</Text>}
       {res && (
         <>
-          <Text style={[T.label, { marginTop: S.md }]}>Gain (dB) · {res.output} / {res.input}</Text>
+          <Text style={[T.label, { marginTop: S.md }]}>
+            Gain (dB) · {res.channel.toUpperCase()} {res.output} / {res.input}
+          </Text>
           <View style={styles.screen}>
             <Canvas style={{ width: W, height: 140 }}>
               <Rect x={0} y={0} width={W} height={140} color={C.scopeBg} />
@@ -535,8 +549,8 @@ function Bode() {
           <Text style={T.caption}>+180° top, −180° bottom, one decade per division</Text>
         </>
       )}
-      <SectionTitle>Output probe</SectionTitle>
-      <ProbeChips kinds={['ch1']} labels={['CH1 (output)']} colors={[C.trace[0]]} />
+      <SectionTitle>Probes</SectionTitle>
+      <ProbeChips kinds={SCOPE_CHANNELS} labels={SCOPE_CHANNELS.map((k) => k.toUpperCase())} colors={[...C.trace]} />
     </>
   );
 }
