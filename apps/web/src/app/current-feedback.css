@@ -1,0 +1,115 @@
+.current-flow {
+  stroke: #fff3a4;
+  filter: drop-shadow(0 0 0.055px #176244);
+  animation: measured-current 1s linear infinite;
+}
+.part-current-flow {
+  stroke: #14714e;
+  filter: none;
+}
+@keyframes measured-current {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -1.02;
+  }
+}
+.motor-rotor {
+  animation: motor-turn 1s linear infinite;
+}
+@keyframes motor-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.circuit-feedback {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  max-width: 520px;
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #d5ded0;
+  border-radius: 12px;
+  background: #fffffff0;
+  box-shadow: 0 3px 14px #34492c0a;
+  pointer-events: none;
+}
+.circuit-feedback strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #314c3d;
+}
+.circuit-feedback p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #637364;
+}
+.feedback-indicator {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #9caa99;
+  flex-shrink: 0;
+}
+.circuit-feedback.working,
+.circuit-feedback.active {
+  border-color: #a8d4b6;
+  background: #f0fcf3f5;
+}
+.circuit-feedback.working .feedback-indicator,
+.circuit-feedback.active .feedback-indicator {
+  background: #278357;
+  box-shadow: 0 0 0 4px #27835714;
+}
+.circuit-feedback.warning {
+  border-color: #e6c590;
+  background: #fffaedf5;
+}
+.circuit-feedback.warning .feedback-indicator {
+  background: #be852e;
+}
+.coach-wiring-help {
+  padding: 14px;
+  margin: 14px 0;
+  border: 1px solid #e6c590;
+  border-radius: 10px;
+  background: #fff9eb;
+}
+.coach-wiring-help strong {
+  font-size: 12px;
+}
+.coach-wiring-help p,
+.coach-wiring-help small {
+  font-size: 11px;
+  line-height: 1.6;
+}
+.coach-wiring-help small {
+  display: block;
+  color: #717660;
+  margin-top: 8px;
+}
+@media (max-width: 600px) {
+  .circuit-feedback {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 9px 11px;
+    max-width: none;
+  }
+  .circuit-feedback p {
+    font-size: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .current-flow,
+  .motor-rotor {
+    animation: none !important;
+  }
+}

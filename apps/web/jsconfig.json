@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@web/*": ["./src/*"],
+      "@sim/*": ["../../sim-core/src/*"],
+      "@/*": ["../../src/*"]
+    }
+  },
+  "exclude": ["node_modules", ".next"]
+}
