@@ -2,9 +2,10 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, Button, Card, Icon } from '@/components/ui';
-import { UNITS } from '@/model/lessons';
-import { QUIZZES, quizId } from '@/model/quizzes';
+import { UNITS, QUIZZES } from '@/model/learning/curriculum';
+import { quizId } from '@/model/quizzes';
 import { setProgress } from '@/store/db';
+import { saveQuizScore } from '@/store/stats';
 import { C, R, S, T } from '@/theme';
 
 export default function QuizScreen() {
@@ -33,6 +34,7 @@ export default function QuizScreen() {
     const last = k + 1 >= questions.length;
     if (last) {
       const total = score;
+      saveQuizScore(u.id, total, questions.length);
       // pass mark: all but one right
       if (total >= questions.length - 1) setProgress(quizId(u.id), 'done');
       else setProgress(quizId(u.id), 'started');
@@ -64,8 +66,8 @@ export default function QuizScreen() {
                 style={({ pressed }) => [
                   styles.option,
                   pressed && !show && { backgroundColor: C.sunken },
-                  show && right && { borderColor: C.ok, backgroundColor: '#E9F7EF' },
-                  show && chosen && !right && { borderColor: C.danger, backgroundColor: '#FDECEC' },
+                  show && right && { borderColor: C.ok, backgroundColor: C.okSoft },
+                  show && chosen && !right && { borderColor: C.danger, backgroundColor: C.dangerSoft },
                 ]}
               >
                 <View style={[styles.bullet, show && right && { backgroundColor: C.ok, borderColor: C.ok }, show && chosen && !right && { backgroundColor: C.danger, borderColor: C.danger }]}>
