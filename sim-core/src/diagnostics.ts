@@ -88,7 +88,7 @@ export function analyzeTopology(netlist: Netlist): Diagnostic[] {
   // ---------- ground reference
   const touchesGround = els.some((e) => e.nodes.includes(0));
   if (!touchesGround) {
-    const src = els.find((e) => e.type === 'V' || e.type === 'supply') ?? els.find((e) => e.type === 'avr');
+    const src = els.find((e) => e.type === 'V' || e.type === 'supply' || e.type === 'cell') ?? els.find((e) => e.type === 'avr');
     const refNode = src ? (src.type === 'avr' ? src.nodes[22] : src.nodes[1]) : undefined;
     out.push({
       severity: 'warning',
@@ -104,7 +104,7 @@ export function analyzeTopology(netlist: Netlist): Diagnostic[] {
   // ---------- shorted sources and ideal source loops
   const uf = new UF(N);
   for (const e of els) {
-    const isSrc = e.type === 'V' || e.type === 'supply';
+    const isSrc = e.type === 'V' || e.type === 'supply' || e.type === 'cell';
     if (isSrc && e.nodes[0] === e.nodes[1]) {
       out.push({
         severity: 'error',
@@ -129,6 +129,23 @@ export function analyzeTopology(netlist: Netlist): Diagnostic[] {
         });
       }
     }
+  }
+
+  // ---------- parts bypassed by their own connection (both leads in one breadboard strip)
+  for (const e of els) {
+    if (e.nodes.length !== 2 || e.nodes[0] !== e.nodes[1]) continue;
+    if (e.type === 'V' || e.type === 'supply' || e.type === 'cell' || e.type === 'I' || e.type === 'sw') continue;
+    // only a part's main element (internal helpers such as the Uno's ground links are fine)
+    if (e.partId !== undefined && e.id !== e.partId) continue;
+    out.push({
+      severity: 'warning',
+      code: 'bypassed',
+      title: `${label(e)} is bypassed`,
+      message: `Both leads of ${label(e)} connect to the same point (${name(e.nodes[0])}), so no current flows through it. On a breadboard the five holes of a column strip are joined: put the leads in different columns (or across the centre channel).`,
+      elementId: e.id,
+      partId: e.partId,
+      node: e.nodes[0],
+    });
   }
 
   // ---------- DC path to ground (floating nodes)

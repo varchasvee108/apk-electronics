@@ -2,7 +2,8 @@ import { ArduinoUno } from './avr/arduino';
 import type { Device } from './device';
 import { OpAmp, Regulator, Timer555 } from './devices/analog-ic';
 import { DCMotor, Relay } from './devices/electromech';
-import { Fuse, Lamp, Servo } from './devices/extra';
+import { Fuse, Lamp, Piezo, Servo } from './devices/extra';
+import { Cell, Darlington, HBridge, Lcd, SensorOut, Sonar, Stepper } from './devices/modules';
 import { Capacitor, Inductor, Resistor, Switch, Transformer } from './devices/passive';
 import { BJT, Diode, MOSFET } from './devices/semis';
 import { ISource, Supply, VSource } from './devices/sources';
@@ -57,6 +58,22 @@ export function createDevice(spec: ElementSpec): Device {
       return new Lamp(spec);
     case 'servo':
       return new Servo(spec);
+    case 'piezo':
+      return new Piezo(spec);
+    case 'dout':
+      return new SensorOut(spec);
+    case 'sonar':
+      return new Sonar(spec);
+    case 'hbridge':
+      return new HBridge(spec);
+    case 'uln':
+      return new Darlington(spec);
+    case 'stepper':
+      return new Stepper(spec);
+    case 'lcd':
+      return new Lcd(spec);
+    case 'cell':
+      return new Cell(spec);
     default:
       throw new Error(`Unknown element type "${spec.type}"`);
   }

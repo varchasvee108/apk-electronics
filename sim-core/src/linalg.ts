@@ -10,6 +10,8 @@ export class DenseSolver {
   private perm: Int32Array;
   private y: Float64Array;
   private colMax: Float64Array;
+  /** Scratch: non-zero column indices of the current pivot row. */
+  private nz: Int32Array;
   /** Unknown index whose pivot vanished on the last failed factorisation. */
   singularIndex = -1;
 
@@ -21,6 +23,7 @@ export class DenseSolver {
     this.perm = new Int32Array(n);
     this.y = new Float64Array(n);
     this.colMax = new Float64Array(n);
+    this.nz = new Int32Array(n);
   }
 
   clear(): void {
@@ -79,12 +82,20 @@ export class DenseSolver {
       }
       const pivot = lu[k * n + k];
       const rk = k * n;
+      // Circuit matrices are sparse: collect the pivot row's non-zero columns once, then update
+      // only those in every row below (same arithmetic as the dense loop, far fewer operations).
+      const nz = this.nz;
+      let m = 0;
+      for (let j = k + 1; j < n; j++) if (lu[rk + j] !== 0) nz[m++] = j;
       for (let i = k + 1; i < n; i++) {
         const ri = i * n;
         const f = lu[ri + k] / pivot;
         if (f === 0) continue;
         lu[ri + k] = f;
-        for (let j = k + 1; j < n; j++) lu[ri + j] -= f * lu[rk + j];
+        for (let q = 0; q < m; q++) {
+          const j = nz[q];
+          lu[ri + j] -= f * lu[rk + j];
+        }
       }
     }
     const y = this.y;

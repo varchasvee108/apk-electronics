@@ -53,6 +53,7 @@ export interface Diagnostic {
     | 'failed'
     | 'unpowered-chip'
     | 'floating-input'
+    | 'bypassed'
     | 'note';
   title: string;
   message: string;

@@ -211,3 +211,61 @@ export class Servo extends Device {
     if (typeof st.lastPulse === 'number') this.lastPulse = st.lastPulse;
   }
 }
+
+/**
+ * Passive piezo buzzer / small speaker. Nodes [+, −]. Electrically a resistive load; it measures the
+ * frequency of the signal driving it (time between rising edges, with hysteresis) so the app can play
+ * that pitch. Unlike an active buzzer it is silent on plain DC.
+ */
+export class Piezo extends Device {
+  private high = false;
+  private lastRise = -1;
+  private tNow = 0;
+  freq = 0;
+  private r(): number {
+    return Math.max(1, this.num('r', 400));
+  }
+  initTransient(): void {
+    this.high = false;
+    this.lastRise = -1;
+    this.freq = 0;
+  }
+  stamp(s: Stamper): void {
+    s.conductance(this.nodes[0], this.nodes[1], this.failed ? OPEN_G : 1 / this.r());
+  }
+  accept(x: Float64Array, t: number): boolean {
+    const v = this.pv(x, 0) - this.pv(x, 1);
+    this.tNow = t;
+    if (!this.high && v > 0.4) {
+      this.high = true;
+      if (this.lastRise >= 0) {
+        const f = 1 / Math.max(1e-9, t - this.lastRise);
+        if (f >= 20 && f <= 20000) this.freq = this.freq > 0 && Math.abs(f - this.freq) < 0.2 * this.freq ? 0.7 * this.freq + 0.3 * f : f;
+      }
+      this.lastRise = t;
+    } else if (this.high && v < 0.1) this.high = false;
+    return false;
+  }
+  read(x: Float64Array): DeviceReading {
+    const v = this.pv(x, 0) - this.pv(x, 1);
+    const i = this.failed ? v * OPEN_G : v / this.r();
+    // sounding while edges keep arriving (a few periods' grace)
+    const sounding = !this.failed && this.freq > 0 && this.lastRise >= 0 && this.tNow - this.lastRise < Math.max(0.03, 3 / this.freq);
+    return { v, i, p: v * i, pinI: [i, -i], extra: { freq: sounding ? this.freq : 0, sounding } };
+  }
+  ratings(): Ratings | null {
+    return { maxV: 30, tau: 1, failAt: 1.3 };
+  }
+  saveState(): unknown {
+    return { ...(super.saveState() as object), high: this.high, lastRise: this.lastRise, freq: this.freq, tNow: this.tNow };
+  }
+  loadState(s: unknown): void {
+    super.loadState(s);
+    const st = s as { high?: boolean; lastRise?: number; freq?: number; tNow?: number } | null;
+    if (!st) return;
+    if (typeof st.high === 'boolean') this.high = st.high;
+    if (typeof st.lastRise === 'number') this.lastRise = st.lastRise;
+    if (typeof st.freq === 'number') this.freq = st.freq;
+    if (typeof st.tNow === 'number') this.tNow = st.tNow;
+  }
+}

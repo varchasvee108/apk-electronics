@@ -1,3 +1,5 @@
+import { MODULE_PROGRAMS } from './programs2';
+
 /**
  * Starter programs. Each has the familiar Arduino sketch (for reading) and an equivalent hand-written
  * AVR assembly program, which Bench assembles on the device. The Arduino C++ is NOT compiled by Bench:
@@ -454,4 +456,5 @@ adc_wait:
 ${SERVO_SUBS}
 `,
   },
+  ...MODULE_PROGRAMS,
 ];
