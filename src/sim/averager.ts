@@ -46,11 +46,20 @@ export class ReadingAverager {
   private acc = new Map<string, Acc>();
   private latest = new Map<string, DeviceReading>();
   /** Voltage between two nodes (meter probes), tracked sample by sample for true AC RMS. */
-  private pair: { a: number; b: number; sum: number; sq: number; min: number; max: number } | null = null;
+  private pair: { a: number; b: number; w: number; sum: number; sq: number; min: number; max: number } | null = null;
 
-  /** Track V(a) − V(b) (the multimeter probes); pass null to stop. */
+  /**
+   * Track V(a) − V(b) (the multimeter probes); pass null to stop. The pair keeps its own time weight:
+   * probes moved halfway through a display interval must not divide a fresh sum by the whole interval
+   * (that read 0 V, or a fraction of the real value, right after every probe move).
+   */
   trackPair(a: number | null, b: number | null): void {
-    this.pair = a !== null && b !== null ? { a, b, sum: 0, sq: 0, min: Infinity, max: -Infinity } : null;
+    if (a === null || b === null) {
+      this.pair = null;
+      return;
+    }
+    if (this.pair && this.pair.a === a && this.pair.b === b) return;
+    this.pair = { a, b, w: 0, sum: 0, sq: 0, min: Infinity, max: -Infinity };
   }
 
   /** Mean, RMS (of the AC part) and peak-to-peak of the tracked pair, or null. */
@@ -58,9 +67,9 @@ export class ReadingAverager {
     const p = this.pair;
     if (!p) return null;
     const now = sim.nodeVoltage(p.a) - sim.nodeVoltage(p.b);
-    if (this.w <= 0) return { mean: now, acRms: 0, pp: 0 };
-    const mean = p.sum / this.w;
-    return { mean, acRms: Math.sqrt(Math.max(0, p.sq / this.w - mean * mean)), pp: p.max - p.min };
+    if (p.w <= 0) return { mean: now, acRms: 0, pp: Number.isFinite(p.max - p.min) ? p.max - p.min : 0 };
+    const mean = p.sum / p.w;
+    return { mean, acRms: Math.sqrt(Math.max(0, p.sq / p.w - mean * mean)), pp: p.max - p.min };
   }
 
   constructor(
@@ -84,6 +93,7 @@ export class ReadingAverager {
     this.w += dt;
     if (this.pair) {
       const d = sim.nodeVoltage(this.pair.a) - sim.nodeVoltage(this.pair.b);
+      this.pair.w += dt;
       this.pair.sum += d * dt;
       this.pair.sq += d * d * dt;
       this.pair.min = Math.min(this.pair.min, d);
@@ -172,6 +182,6 @@ export class ReadingAverager {
     this.nodeMin.fill(Infinity);
     this.nodeMax.fill(-Infinity);
     this.acc.clear();
-    if (this.pair) this.pair = { ...this.pair, sum: 0, sq: 0, min: Infinity, max: -Infinity };
+    if (this.pair) this.pair = { ...this.pair, w: 0, sum: 0, sq: 0, min: Infinity, max: -Infinity };
   }
 }

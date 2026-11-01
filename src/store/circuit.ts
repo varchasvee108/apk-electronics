@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { partDef, pinPositions } from '@/model/parts';
-import { holeAt } from '@/model/breadboard';
+import { isAnchor, pinIndex, settleOffset } from '@/model/connect';
+import { carryWires, centroid, pinsOf } from '@/model/edit';
+import { applyFixOps, type Fix } from '@/model/fixes';
 import { newId, ptKey, samePt, type CircuitDoc, type PartInstance, type ProbeKind, type Pt, type Rot, type Wire } from '@/model/types';
 import { saveCircuit } from './db';
 
@@ -53,51 +55,16 @@ interface CircuitState {
   addWire(a: Pt, b: Pt): string | null;
   setWireColorFor(ids: string[], color: string): void;
   moveWireEnd(id: string, end: 'a' | 'b', to: Pt): void;
+  /** Apply an automatic fix's document changes (one undo step). */
+  applyFix(fix: Fix): void;
+  /** Bend a wire through a point (null straightens it). */
+  bendWire(id: string, via: Pt | null): void;
   placeProbe(kind: ProbeKind, at: Pt | null): void;
   rename(name: string): void;
   markSaved(): void;
 }
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
-
-function centroid(pts: Pt[]): Pt {
-  const n = Math.max(1, pts.length);
-  return { x: pts.reduce((a, q) => a + q.x, 0) / n, y: pts.reduce((a, q) => a + q.y, 0) / n };
-}
-
-function pinsOf(d: CircuitDoc, ids: Set<string>): Map<string, Pt[]> {
-  return new Map(d.parts.filter((p) => ids.has(p.id)).map((p) => [p.id, pinPositions(p).map(({ x, y }) => ({ x, y }))]));
-}
-
-/**
- * After parts moved or rotated, bring along the wire ends that were attached to their pins:
- * always in a schematic, for pins that sit outside the breadboard (battery, supply, Arduino headers),
- * and for wires whose two ends both belong to moved parts. Wires plugged into breadboard holes stay put.
- */
-function carryWires(d: CircuitDoc, before: Map<string, Pt[]>): void {
-  const moved = new Map<string, Pt>();
-  const loose = new Set<string>();
-  for (const p of d.parts) {
-    const old = before.get(p.id);
-    if (!old) continue;
-    const now = pinPositions(p);
-    old.forEach((o, k) => {
-      const key = ptKey(o);
-      moved.set(key, { x: now[k].x, y: now[k].y });
-      if (d.board === 'none' || !holeAt(o)) loose.add(key);
-    });
-  }
-  for (const w of d.wires) {
-    const ka = ptKey(w.a);
-    const kb = ptKey(w.b);
-    const both = moved.has(ka) && moved.has(kb);
-    const na = moved.get(ka);
-    const nb = moved.get(kb);
-    if (na && (both || loose.has(ka))) w.a = na;
-    if (nb && (both || loose.has(kb))) w.b = nb;
-  }
-  d.wires = d.wires.filter((w) => !samePt(w.a, w.b));
-}
 
 /** Selection restricted to items that still exist (undo should not close the inspector needlessly). */
 function keepSelection(sel: Selection, d: CircuitDoc): Selection {
@@ -209,6 +176,11 @@ export const useCircuit = create<CircuitState>((set, get) => ({
   movePartsBy(ids, dx, dy) {
     if (!dx && !dy) return;
     const moving = new Set(ids);
+    // a lead dropped over the centre channel or a rail gap would connect to nothing: nudge into holes
+    const [ox, oy] = settleOffset(get().doc, moving, dx, dy);
+    dx += ox;
+    dy += oy;
+    if (!dx && !dy) return;
     get().apply((d) => {
       const before = pinsOf(d, moving);
       for (const p of d.parts) {
@@ -245,8 +217,12 @@ export const useCircuit = create<CircuitState>((set, get) => ({
     const ps = new Set(parts);
     const ws = new Set(wires);
     get().apply((d) => {
+      const freed = new Set(d.parts.filter((p) => ps.has(p.id)).flatMap((p) => pinPositions(p).map((q) => ptKey(q))));
       d.parts = d.parts.filter((p) => !ps.has(p.id));
-      d.wires = d.wires.filter((w) => !ws.has(w.id));
+      // a jumper clipped to a removed off-board terminal would be left dangling in mid-air
+      const pins = pinIndex(d);
+      const hanging = (q: Pt) => freed.has(ptKey(q)) && !isAnchor(d, q, pins);
+      d.wires = d.wires.filter((w) => !ws.has(w.id) && !hanging(w.a) && !hanging(w.b));
     });
     set({ selection: { parts: [], wires: [] }, pinned: get().pinned.filter((p) => !ps.has(p)) });
   },
@@ -261,9 +237,13 @@ export const useCircuit = create<CircuitState>((set, get) => ({
         d.parts.push({ ...clone(p), id, x: p.x + 2, y: p.y + 3, label: undefined } as PartInstance);
         newParts.push(id);
       }
+      const pins = pinIndex(d);
       for (const w of d.wires.filter((q) => wires.includes(q.id))) {
+        const a = { x: w.a.x + 2, y: w.a.y + 3 };
+        const b = { x: w.b.x + 2, y: w.b.y + 3 };
+        if (!isAnchor(d, a, pins) || !isAnchor(d, b, pins)) continue;
         const id = newId('w');
-        d.wires.push({ ...w, id, a: { x: w.a.x + 2, y: w.a.y + 3 }, b: { x: w.b.x + 2, y: w.b.y + 3 } });
+        d.wires.push({ ...w, id, a, b, via: w.via ? { x: w.via.x + 2, y: w.via.y + 3 } : undefined });
         newWires.push(id);
       }
     });
@@ -281,6 +261,12 @@ export const useCircuit = create<CircuitState>((set, get) => ({
 
   addWire(a, b) {
     if (samePt(a, b)) return null;
+    const { doc } = get();
+    const pins = pinIndex(doc);
+    // both ends must plug into a hole or a terminal; a wire ending in mid-air connects nothing
+    if (!isAnchor(doc, a, pins) || !isAnchor(doc, b, pins)) return null;
+    // a second identical jumper adds nothing
+    if (doc.wires.some((w) => (samePt(w.a, a) && samePt(w.b, b)) || (samePt(w.a, b) && samePt(w.b, a)))) return null;
     const id = newId('w');
     const color = get().wireColor;
     get().apply((d) => {
@@ -298,10 +284,28 @@ export const useCircuit = create<CircuitState>((set, get) => ({
   },
 
   moveWireEnd(id, end, to) {
+    const { doc } = get();
+    const w0 = doc.wires.find((q) => q.id === id);
+    if (!w0 || samePt(w0[end], to) || !isAnchor(doc, to)) return;
     get().apply((d) => {
       const w = d.wires.find((q) => q.id === id);
       if (w) w[end] = to;
       d.wires = d.wires.filter((q) => !samePt(q.a, q.b));
+    });
+  },
+
+  applyFix(fix) {
+    if (!fix.ops.some((o) => o.kind !== 'repair')) return;
+    get().apply((d) => applyFixOps(d, fix.ops));
+  },
+
+  bendWire(id, via) {
+    get().apply((d) => {
+      const w = d.wires.find((q) => q.id === id);
+      if (!w) return;
+      // a bend that sits on the straight line is no bend at all
+      if (!via || Math.hypot(via.x - (w.a.x + w.b.x) / 2, via.y - (w.a.y + w.b.y) / 2) < 0.3) delete w.via;
+      else w.via = { x: Math.round(via.x * 4) / 4, y: Math.round(via.y * 4) / 4 };
     });
   },
 

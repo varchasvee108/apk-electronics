@@ -25,6 +25,8 @@ export interface Wire {
   a: Pt;
   b: Pt;
   color: string;
+  /** Optional bend: the wire is drawn as a smooth curve through this point. */
+  via?: Pt;
 }
 
 export type ProbeKind = 'dmm+' | 'dmm-' | 'ch1' | 'ch2' | 'ch3' | 'ch4' | 'la0' | 'la1' | 'la2' | 'la3' | 'la4' | 'la5' | 'la6' | 'la7';

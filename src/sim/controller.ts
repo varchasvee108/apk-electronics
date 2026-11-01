@@ -2,7 +2,7 @@ import { analyzeTopology } from '@sim/diagnostics';
 import { Simulator, SimulationError } from '@sim/simulator';
 import type { Diagnostic, ElementSpec, Netlist } from '@sim/types';
 import { extractNetlist, nodeAt, topologyKey, type Extraction } from '@/model/netlist';
-import { pinPositions } from '@/model/parts';
+import { partLabel, pinPositions } from '@/model/parts';
 import { ptKey, type CircuitDoc, type ProbeKind } from '@/model/types';
 import { ReadingAverager } from './averager';
 import { buildSnapshot, partPinCurrents, wireCurrents } from './snapshot';
@@ -362,7 +362,22 @@ class SimController {
   // ------------------------------------------------------------------ snapshots
 
   private publishStatic(): void {
-    useSim.setState({ diagnostics: this.staticDiagnostics() });
+    useSim.setState({ diagnostics: this.named(this.staticDiagnostics()) });
+  }
+
+  /** Parts are named by their label (R1, D2…) in messages, never by internal ids. */
+  private named(ds: Diagnostic[]): Diagnostic[] {
+    const doc = this.doc;
+    if (!doc) return ds;
+    return ds.map((d) => {
+      const part = d.partId ? doc.parts.find((p) => p.id === d.partId) : undefined;
+      if (!part) return d;
+      const lbl = partLabel(part, doc.parts);
+      if (lbl === part.id) return d;
+      const re = new RegExp(`\\b${part.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+      const swap = (t: string) => t.replace(re, lbl);
+      return { ...d, title: swap(d.title), message: swap(d.message) };
+    });
   }
 
   private staticDiagnostics(): Diagnostic[] {
@@ -388,7 +403,7 @@ class SimController {
     avg.reset();
     this.wireSq.clear();
     this.wireN = 0;
-    const diagnostics = [...sim.topology, ...sim.liveDiagnostics()];
+    const diagnostics = this.named([...sim.topology, ...sim.liveDiagnostics()]);
     useSim.setState({ snapshot, diagnostics, simTime: sim.t, speed: this.speedEma, traceVersion: this.trace.version + sim.steps });
     void force;
   }
@@ -423,7 +438,7 @@ class SimController {
     for (const e of ex.netlist.elements) {
       if (e.type === 'I' || e.type === 'avr' || e.type === 'logic' || e.type === '555') continue;
       if (e.type === 'V') elements.push({ ...e, params: { ...e.params, wave: 'dc', v: 0 } });
-      else if (e.type === 'supply') elements.push({ ...e, type: 'V', params: { v: 0, r: 0.005 } });
+      else if (e.type === 'supply' || e.type === 'cell') elements.push({ ...e, type: 'V', params: { v: 0, r: 0.005 } });
       else elements.push(e);
     }
     const test = 1e-3;
