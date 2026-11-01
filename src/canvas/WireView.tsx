@@ -2,9 +2,9 @@ import { Circle, DashPathEffect, Path, Skia } from '@shopify/react-native-skia';
 import { memo, useMemo } from 'react';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { Pt, Wire } from '@/model/types';
-import { C, voltageColor } from '@/theme';
+import { CANVAS as C, voltageColor } from '@/theme';
 import { alpha } from './draw';
-import { wireControl } from './hit';
+import { wireCurveControl, wireMid } from './hit';
 
 const DASH = [0.16, 0.62];
 const PERIOD = DASH[0] + DASH[1];
@@ -16,12 +16,15 @@ export function flowSpeed(i: number): number {
   return Math.sign(i) * Math.min(9, 0.9 * Math.log10(a / 1e-6));
 }
 
-function wirePath(a: Pt, b: Pt, arc: boolean) {
+function wirePath(a: Pt, b: Pt, arc: boolean, via?: Pt) {
   const p = Skia.PathBuilder.Make();
   p.moveTo(a.x, a.y);
   if (arc) {
-    const c = wireControl(a, b);
+    const c = wireCurveControl({ a, b, via });
     p.quadTo(c.x, c.y, b.x, b.y);
+  } else if (via) {
+    // schematic: straight segments through the bend point
+    p.lineTo(via.x, via.y).lineTo(b.x, b.y);
   } else p.lineTo(b.x, b.y);
   return p.build();
 }
@@ -50,7 +53,7 @@ export const WireView = memo(function WireView({
   showFlow: boolean;
   clock: SharedValue<number>;
 }) {
-  const path = useMemo(() => wirePath(wire.a, wire.b, !schematic), [wire.a, wire.b, schematic]);
+  const path = useMemo(() => wirePath(wire.a, wire.b, !schematic, wire.via), [wire.a, wire.b, wire.via, schematic]);
   const speed = showFlow ? flowSpeed(current) : 0;
   // AC: the dots rock back and forth (amplitude grows with the RMS current) instead of drifting
   const wobble = showFlow && acCurrent > 2e-6 && acCurrent > 1.5 * Math.abs(current) ? Math.min(PERIOD * 0.9, Math.abs(flowSpeed(acCurrent)) * 0.12) : 0;
@@ -76,9 +79,22 @@ export const WireView = memo(function WireView({
           <Circle cx={wire.b.x} cy={wire.b.y} r={0.17} color="#9EA5AE" />
         </>
       )}
+      {selected && <BendHandle wire={wire} arc={!schematic} />}
     </>
   );
 });
+
+/** Drag handle in the middle of a selected wire: drag it to bend the wire around parts. */
+function BendHandle({ wire, arc }: { wire: Wire; arc: boolean }) {
+  const m = wireMid(wire, arc);
+  return (
+    <>
+      <Circle cx={m.x} cy={m.y} r={0.36} color="#FFFFFF" />
+      <Circle cx={m.x} cy={m.y} r={0.36} color={C.select} style="stroke" strokeWidth={0.08} />
+      <Circle cx={m.x} cy={m.y} r={0.12} color={C.select} />
+    </>
+  );
+}
 
 /** Schematic net line between two pins (L-shaped), with flow dots when current is known. */
 export const NetLine = memo(function NetLine({ a, b, color }: { a: Pt; b: Pt; color: string }) {

@@ -1,4 +1,4 @@
-import { Canvas, Circle, Group, Line, Picture, Rect, RoundedRect, useCanvasRef, vec } from '@shopify/react-native-skia';
+import { Canvas, Circle, DashPathEffect, Group, Line, Path, Picture, Rect, RoundedRect, Skia, useCanvasRef, vec } from '@shopify/react-native-skia';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import {
@@ -14,17 +14,21 @@ import { useDerivedValue, useFrameCallback, useSharedValue } from 'react-native-
 import { scheduleOnRN } from 'react-native-worklets';
 import { formatEng } from '@sim/units';
 import { allHoles, holeAt } from '@/model/breadboard';
+import { loosePins, settleOffset, snapToAnchor } from '@/model/connect';
+import { placementFor } from '@/model/placement';
+import * as haptic from '@/lib/haptics';
+import { useGuide } from '@/store/guide';
 import { nodeAt } from '@/model/netlist';
-import { partBounds, partLabel, pinPositions } from '@/model/parts';
+import { partBounds, partDef, partLabel, pinPositions } from '@/model/parts';
 import { ptKey, type Pt } from '@/model/types';
 import { controller, type Snapshot } from '@/sim/controller';
 import { damp } from '@/sim/smooth';
 import { useSim } from '@/sim/store';
 import { useCircuit } from '@/store/circuit';
-import { C } from '@/theme';
+import { CANVAS as C } from '@/theme';
 import { boardPicture, gridPicture } from './board';
 import { Label, U, alpha, textWidth } from './draw';
-import { docBounds, hitPart, hitWire, netSegments, snap } from './hit';
+import { docBounds, hitPart, hitWire, netSegments, snap, wireMid } from './hit';
 import { PartView } from './PartView';
 import { NetLine, WireView } from './WireView';
 
@@ -34,6 +38,8 @@ export interface CanvasApi {
   zoom(factor: number): void;
   center(): Pt;
   snapshot(): string | null;
+  /** Drop a new part of `type` at a point in canvas view coordinates (drag from the parts tray). */
+  dropPart(type: string, x: number, y: number): string | null;
 }
 
 interface Box {
@@ -73,8 +79,12 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const sc = useSharedValue(U);
   const clock = useSharedValue(0);
   const drag = { ids: useSharedValue<string[]>([]), dx: useSharedValue(0), dy: useSharedValue(0) };
-  const mode = useSharedValue<'pan' | 'part' | 'wire' | 'wireEnd' | 'marquee' | 'press' | 'none'>('none');
-  const wireEnds = useSharedValue<{ id: string; ax: number; ay: number; bx: number; by: number; sel: boolean }[]>([]);
+  const mode = useSharedValue<'pan' | 'part' | 'wire' | 'wireEnd' | 'bend' | 'marquee' | 'press' | 'none'>('none');
+  const wireEnds = useSharedValue<{ id: string; ax: number; ay: number; bx: number; by: number; mx: number; my: number; sel: boolean; via: boolean }[]>([]);
+  /** Last hole the dragged wire end snapped to (for the haptic tick on each new hole). */
+  const lastSnap = useSharedValue({ x: NaN, y: NaN });
+  /** Last whole-hole offset of a dragged part (haptic tick per hole). */
+  const lastStep = useSharedValue({ x: 0, y: 0 });
   const grabbed = useSharedValue({ id: '', end: 'a' as 'a' | 'b' });
   const lastFocal = useSharedValue({ x: 0, y: 0 });
   /** Finger position (view pixels) at touch-down, so drags include the movement before activation. */
@@ -87,6 +97,14 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const selIds = useSharedValue<string[]>([]);
   const toolSv = useSharedValue<string>(tool);
   const runningSv = useSharedValue(false);
+  /** Every point a wire end may plug into (pins, plus holes on a breadboard), flattened x,y,x,y... */
+  const anchors = useSharedValue<number[]>([]);
+  /** Free schematic canvas: any grid point is a valid wire end. */
+  const freeSv = useSharedValue(false);
+  /** The live wire end has a valid target under the finger. */
+  const targetOk = useSharedValue(1);
+  /** Ends of the wire being bent (for the live preview). */
+  const bendAB = useSharedValue({ ax: 0, ay: 0, bx: 0, by: 0 });
   const pendingWire = useRef<Pt | null>(null);
   const [pendingWireUi, setPendingWireUi] = useState<Pt | null>(null);
   const canvasRef = useCanvasRef();
@@ -103,7 +121,14 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   }, [selection.parts, selIds]);
   useEffect(() => {
     const hidden = sch && doc.board === 'breadboard';
-    wireEnds.set(hidden ? [] : doc.wires.map((w) => ({ id: w.id, ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y, sel: selection.wires.includes(w.id) })));
+    wireEnds.set(
+      hidden
+        ? []
+        : doc.wires.map((w) => {
+            const m = wireMid(w, !sch);
+            return { id: w.id, ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y, mx: m.x, my: m.y, sel: selection.wires.includes(w.id), via: !!w.via };
+          }),
+    );
   }, [doc.wires, doc.board, sch, selection.wires, wireEnds]);
   useEffect(() => {
     toolSv.set(tool);
@@ -112,7 +137,18 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   useEffect(() => {
     runningSv.set(powered);
   }, [powered, runningSv]);
+  useEffect(() => {
+    const pts: number[] = [];
+    for (const p of doc.parts) for (const q of pinPositions(p)) pts.push(q.x, q.y);
+    if (doc.board === 'breadboard') for (const h of allHoles()) pts.push(h.x, h.y);
+    anchors.set(pts);
+    freeSv.set(doc.board === 'none');
+  }, [doc.parts, doc.board, anchors, freeSv]);
+  const loose = useMemo(() => (sch ? [] : loosePins(doc)), [doc, sch]);
 
+  const guidePins = useGuide((s) => s.pins);
+  const guideLine = useGuide((s) => s.line);
+  const pulse = useDerivedValue(() => 0.45 + 0.4 * Math.sin(clock.get() * 5));
   const ex = useSim((s) => s.ex);
   const segments = useMemo(() => (sch && doc.board === 'breadboard' && ex ? netSegments(doc, ex.partPins) : []), [sch, doc, ex]);
 
@@ -123,7 +159,8 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     const top = 72;
     const pad = 12;
     const w = size.w - pad * 2;
-    const h = size.h - top - pad;
+    // and for the view controls at the bottom (phones)
+    const h = size.h - top - 64;
     const s = Math.max(4, Math.min(90, Math.min(w / (b.x1 - b.x0), h / (b.y1 - b.y0))));
     sc.set(s);
     tx.set(pad + (w - (b.x1 - b.x0) * s) / 2 - b.x0 * s);
@@ -141,6 +178,8 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   }, [doc.id, sch, size, fit]);
 
   const toWorld = useCallback((x: number, y: number): Pt => ({ x: (x - tx.get()) / sc.get(), y: (y - ty.get()) / sc.get() }), [tx, ty, sc]);
+  /** Finger-sized search radius in grid units (about 22 px on screen, at least half a hole). */
+  const touchRadius = useCallback(() => Math.min(2.5, Math.max(0.6, 22 / sc.get())), [sc]);
 
   useEffect(() => {
     onReady?.({
@@ -159,6 +198,26 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         const img = canvasRef.current?.makeImageSnapshot();
         return img ? img.encodeToBase64() : null;
       },
+      dropPart: (type: string, x: number, y: number) => {
+        const st = useCircuit.getState();
+        const w = toWorld(x, y);
+        const def = partDef(type);
+        // the finger holds the middle of the part's leads
+        const pins = def.pins;
+        const cx = pins.reduce((a, q) => a + q.dx, 0) / pins.length;
+        const cy = pins.reduce((a, q) => a + q.dy, 0) / pins.length;
+        let at = { x: Math.round(w.x - cx), y: Math.round(w.y - cy) };
+        if (st.doc.board === 'breadboard') {
+          const probe = { ...st.doc, parts: [...st.doc.parts, { id: '__drop', type, x: at.x, y: at.y, rot: 0 as const, props: def.defaults }] };
+          const [ox, oy] = settleOffset(probe, new Set(['__drop']), 0, 0);
+          at = { x: at.x + ox, y: at.y + oy };
+        }
+        // a drop far outside everything still lands somewhere sensible
+        if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) at = placementFor(type, w, st.doc);
+        const id = st.addPart(type, at);
+        haptic.tap();
+        return id;
+      },
     });
   }, [onReady, fit, toWorld, size, canvasRef, sc, tx, ty]);
 
@@ -171,7 +230,10 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const onDragEnd = useCallback(
     (dx: number, dy: number) => {
       const ids = drag.ids.get();
-      if (ids.length && (dx || dy)) useCircuit.getState().movePartsBy(ids, dx, dy);
+      if (ids.length && (dx || dy)) {
+        useCircuit.getState().movePartsBy(ids, dx, dy);
+        haptic.tap();
+      }
       drag.ids.set([]);
       drag.dx.set(0);
       drag.dy.set(0);
@@ -181,15 +243,23 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
 
   const press = useCallback((id: string, down: boolean) => {
     useCircuit.getState().setProp(id, 'pressed', down, 'live');
+    if (down) haptic.bump();
   }, []);
 
   const onWire = useCallback((ax: number, ay: number, bx: number, by: number) => {
-    if (ax === bx && ay === by) return;
-    useCircuit.getState().addWire({ x: ax, y: ay }, { x: bx, y: by });
+    if (![ax, ay, bx, by].every(Number.isFinite) || (ax === bx && ay === by)) return;
+    if (useCircuit.getState().addWire({ x: ax, y: ay }, { x: bx, y: by })) haptic.tap();
+    else haptic.error();
   }, []);
 
   const onWireEnd = useCallback((id: string, end: 'a' | 'b', x: number, y: number) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     useCircuit.getState().moveWireEnd(id, end, { x, y });
+    haptic.tap();
+  }, []);
+
+  const onBend = useCallback((id: string, x: number, y: number) => {
+    useCircuit.getState().bendWire(id, { x, y });
   }, []);
 
   const onMarquee = useCallback((x0: number, y0: number, x1: number, y1: number) => {
@@ -208,28 +278,40 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
     (x: number, y: number) => {
       const st = useCircuit.getState();
       const w = toWorld(x, y);
-      const g = snap(w);
+      const r = touchRadius();
+      const anchor = snapToAnchor(st.doc, w, { radius: r });
+      const g = anchor ?? snap(w);
       if (st.tool === 'probe') {
-        st.placeProbe(st.probeTool, g);
+        // a probe must touch metal: the nearest hole or lead (a tap on a part body uses its nearest lead)
+        const at = snapToAnchor(st.doc, w, { radius: r, partBodies: true });
+        if (at) st.placeProbe(st.probeTool, at);
         return;
       }
       if (st.tool === 'wire') {
         const start = pendingWire.current;
+        // nothing to plug into here: keep any started wire waiting for a valid second end
+        if (!anchor) return;
         if (start) {
-          if (start.x !== g.x || start.y !== g.y) st.addWire(start, g);
+          if (start.x !== anchor.x || start.y !== anchor.y) {
+            if (st.addWire(start, anchor)) haptic.tap();
+          }
           pendingWire.current = null;
           setPendingWireUi(null);
         } else {
-          pendingWire.current = g;
-          setPendingWireUi(g);
+          pendingWire.current = anchor;
+          setPendingWireUi(anchor);
+          haptic.tick();
         }
         return;
       }
       const part = hitPart(st.doc, w);
       if (part) {
         const running = useSim.getState().status !== 'off';
-        if (running && part.type === 'toggle') st.setProp(part.id, 'pos', !part.props.pos);
-        else if (running && part.type === 'dipswitch') {
+        if (running && part.type === 'toggle') {
+          st.setProp(part.id, 'pos', !part.props.pos);
+          haptic.bump();
+        } else if (running && part.type === 'dipswitch') {
+          haptic.bump();
           const local = { x: w.x - part.x, y: w.y - part.y };
           const k = Math.max(0, Math.min(3, Math.round(part.rot === 0 ? local.x : part.rot === 2 ? -local.x : part.rot === 1 ? local.y : -local.y)));
           st.setProp(part.id, `s${k}`, !part.props[`s${k}`]);
@@ -255,7 +337,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
       }
       st.clearSelection();
     },
-    [toWorld],
+    [toWorld, touchRadius],
   );
 
   const handleLongPress = useCallback(
@@ -268,13 +350,36 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         return;
       }
       const cur = useSim.getState().ex;
-      const n = cur ? nodeAt(cur, snap(w)) : undefined;
+      const at = snapToAnchor(st.doc, w, { radius: touchRadius() }) ?? snap(w);
+      const n = cur ? nodeAt(cur, at) : undefined;
       if (n !== undefined) st.togglePin(`net:${n}`);
     },
-    [toWorld],
+    [toWorld, touchRadius],
   );
 
   // ---------------------------------------------------------------- gestures (pan / pinch on the UI thread)
+  /** Nearest anchor to (x, y) within the finger radius; NaN when there is none (UI thread). */
+  const nearestAnchor = (x: number, y: number): { x: number; y: number } => {
+    'worklet';
+    const r = Math.min(2.5, Math.max(0.6, 22 / sc.get()));
+    const a = anchors.get();
+    let bx = NaN;
+    let by = NaN;
+    let bd = r * r;
+    for (let i = 0; i < a.length; i += 2) {
+      const dx = a[i] - x;
+      const dy = a[i + 1] - y;
+      const d = dx * dx + dy * dy;
+      if (d <= bd) {
+        bd = d;
+        bx = a[i];
+        by = a[i + 1];
+      }
+    }
+    if (Number.isNaN(bx) && freeSv.get()) return { x: Math.round(x), y: Math.round(y) };
+    return { x: bx, y: by };
+  };
+
   const pan = usePanGesture({
     maxPointers: 1,
     minDistance: 4,
@@ -285,14 +390,24 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
       mode.set('pan');
       const t = toolSv.get();
       if (t === 'wire') {
+        const s0 = nearestAnchor(w.x, w.y);
+        if (Number.isNaN(s0.x)) {
+          // started away from any hole or pin: just pan the view
+          mode.set('pan');
+          return;
+        }
         mode.set('wire');
-        pStart.set({ x: Math.round(w.x), y: Math.round(w.y) });
-        pEnd.set(pStart.get());
+        pStart.set(s0);
+        pEnd.set(s0);
+        targetOk.set(0);
         return;
       }
       if (t === 'select' || t === 'multi') {
         const ends = wireEnds.get();
-        const grab = (onlySelected: boolean, tol: number): boolean => {
+        // grab tolerance never shrinks below a fingertip when zoomed out
+        const k = Math.max(1, 14 / sc.get());
+        const grab = (onlySelected: boolean, tol0: number): boolean => {
+          const tol = tol0 * k;
           for (let i = ends.length - 1; i >= 0; i--) {
             const we = ends[i];
             if (onlySelected && !we.sel) continue;
@@ -304,10 +419,22 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
             grabbed.set({ id: we.id, end: endA ? 'a' : 'b' });
             pStart.set(endA ? { x: we.bx, y: we.by } : { x: we.ax, y: we.ay });
             pEnd.set(endA ? { x: we.ax, y: we.ay } : { x: we.bx, y: we.by });
+            targetOk.set(1);
             return true;
           }
           return false;
         };
+        // the bend handle in the middle of a selected wire
+        for (let i = ends.length - 1; i >= 0 && t === 'select'; i--) {
+          const we = ends[i];
+          if (!we.sel) continue;
+          if (Math.hypot(w.x - we.mx, w.y - we.my) > 0.6 * k) continue;
+          mode.set('bend');
+          grabbed.set({ id: we.id, end: 'a' });
+          bendAB.set({ ax: we.ax, ay: we.ay, bx: we.bx, by: we.by });
+          pEnd.set({ x: we.mx, y: we.my });
+          return;
+        }
         if (t === 'select' && grab(true, 0.6)) return;
         const bs = boxes.get();
         for (let i = bs.length - 1; i >= 0; i--) {
@@ -321,6 +448,7 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
               return;
             }
             mode.set('part');
+            lastStep.set({ x: 0, y: 0 });
             drag.ids.set(selIds.get().includes(b.id) ? selIds.get() : [b.id]);
             drag.dx.set(0);
             drag.dy.set(0);
@@ -346,8 +474,28 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         const t0 = touchStart.get();
         drag.dx.set((e.x - t0.x) / sc.get());
         drag.dy.set((e.y - t0.y) / sc.get());
-      } else if (m === 'wire' || m === 'wireEnd') {
+        const sx = Math.round(drag.dx.get());
+        const sy = Math.round(drag.dy.get());
+        const ls = lastStep.get();
+        if (sx !== ls.x || sy !== ls.y) {
+          lastStep.set({ x: sx, y: sy });
+          scheduleOnRN(haptic.tick);
+        }
+      } else if (m === 'bend') {
         pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
+      } else if (m === 'wire' || m === 'wireEnd') {
+        const wx = (e.x - tx.get()) / sc.get();
+        const wy = (e.y - ty.get()) / sc.get();
+        const s1 = nearestAnchor(wx, wy);
+        const ok = !Number.isNaN(s1.x);
+        targetOk.set(ok ? 1 : 0);
+        // the free end follows the finger and jumps into the hole or pin it would plug into
+        pEnd.set(ok ? s1 : { x: wx, y: wy });
+        const ls = lastSnap.get();
+        if (ok && (s1.x !== ls.x || s1.y !== ls.y)) {
+          lastSnap.set({ x: s1.x, y: s1.y });
+          scheduleOnRN(haptic.tick);
+        }
       } else if (m === 'marquee') {
         pEnd.set({ x: (e.x - tx.get()) / sc.get(), y: (e.y - ty.get()) / sc.get() });
       }
@@ -367,10 +515,12 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
         if (b) scheduleOnRN(press, b.id, false);
         longPressOn.set(true);
       } else if (m === 'wire' && !e.canceled) {
-        scheduleOnRN(onWire, pStart.get().x, pStart.get().y, Math.round(pEnd.get().x), Math.round(pEnd.get().y));
+        if (targetOk.get()) scheduleOnRN(onWire, pStart.get().x, pStart.get().y, pEnd.get().x, pEnd.get().y);
       } else if (m === 'wireEnd' && !e.canceled) {
         const g = grabbed.get();
-        scheduleOnRN(onWireEnd, g.id, g.end, Math.round(pEnd.get().x), Math.round(pEnd.get().y));
+        if (targetOk.get()) scheduleOnRN(onWireEnd, g.id, g.end, pEnd.get().x, pEnd.get().y);
+      } else if (m === 'bend' && !e.canceled) {
+        scheduleOnRN(onBend, grabbed.get().id, pEnd.get().x, pEnd.get().y);
       } else if (m === 'marquee' && !e.canceled) {
         scheduleOnRN(onMarquee, pStart.get().x, pStart.get().y, pEnd.get().x, pEnd.get().y);
       }
@@ -414,8 +564,19 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
   const camera = useDerivedValue(() => [{ translateX: tx.get() }, { translateY: ty.get() }, { scale: sc.get() }]);
   const wireOn = useDerivedValue(() => (mode.get() === 'wire' || mode.get() === 'wireEnd' ? 1 : 0));
   const wP1 = useDerivedValue(() => vec(pStart.get().x, pStart.get().y));
-  const wP2 = useDerivedValue(() => vec(Math.round(pEnd.get().x), Math.round(pEnd.get().y)));
+  const wP2 = useDerivedValue(() => vec(pEnd.get().x, pEnd.get().y));
+  const okOpacity = useDerivedValue(() => targetOk.get());
+  const badOpacity = useDerivedValue(() => 1 - targetOk.get());
   const marqueeOn = useDerivedValue(() => (mode.get() === 'marquee' ? 1 : 0));
+  const bendOn = useDerivedValue(() => (mode.get() === 'bend' ? 1 : 0));
+  const bendPath = useDerivedValue(() => {
+    const ab = bendAB.get();
+    const v = pEnd.get();
+    const b = Skia.PathBuilder.Make();
+    b.moveTo(ab.ax, ab.ay);
+    b.quadTo(2 * v.x - (ab.ax + ab.bx) / 2, 2 * v.y - (ab.ay + ab.by) / 2, ab.bx, ab.by);
+    return b.build();
+  });
   const mx = useDerivedValue(() => Math.min(pStart.get().x, pEnd.get().x));
   const my = useDerivedValue(() => Math.min(pStart.get().y, pEnd.get().y));
   const mw = useDerivedValue(() => Math.abs(pEnd.get().x - pStart.get().x));
@@ -498,13 +659,47 @@ export function BenchCanvas({ onReady, showVoltage, showFlow }: { onReady?: (api
                 />
               ))}
               {sch && doc.board === 'none' && <Junctions />}
+              {/* build-along: where the next part or wire goes */}
+              {guideLine && (
+                <Line p1={vec(guideLine[0].x, guideLine[0].y)} p2={vec(guideLine[1].x, guideLine[1].y)} color={alpha(C.accent, 0.8)} strokeWidth={0.16} strokeCap="round">
+                  <DashPathEffect intervals={[0.35, 0.25]} />
+                </Line>
+              )}
+              {guidePins.map((p, i) => (
+                <Group key={`g${i}`} opacity={pulse}>
+                  <Circle cx={p.x} cy={p.y} r={0.48} color={alpha(C.accent, 0.25)} />
+                  <Circle cx={p.x} cy={p.y} r={0.48} color={C.accent} style="stroke" strokeWidth={0.09} />
+                </Group>
+              ))}
+              {/* leads that are not plugged into anything */}
+              {loose.map((p, i) => (
+                <Group key={`loose${i}`}>
+                  <Circle cx={p.x} cy={p.y} r={0.3} color={alpha(C.danger, 0.18)} />
+                  <Circle cx={p.x} cy={p.y} r={0.3} color={C.danger} style="stroke" strokeWidth={0.07} />
+                </Group>
+              ))}
               {Object.entries(doc.probes).map(([k, p]) =>
                 p && PROBE_STYLE[k] ? <ProbeMark key={k} p={p} {...PROBE_STYLE[k]} /> : p && k.startsWith('la') ? <ProbeMark key={k} p={p} color="#8E4EC6" text={`L${k.slice(2)}`} /> : null,
               )}
               {tool === 'wire' && pendingWireUi && <Circle cx={pendingWireUi.x} cy={pendingWireUi.y} r={0.4} color={alpha(C.accent, 0.6)} />}
               <Group opacity={wireOn}>
                 <Line p1={wP1} p2={wP2} color={useCircuit.getState().wireColor} strokeWidth={0.27} strokeCap="round" />
-                <Circle c={wP2} r={0.3} color={alpha(C.accent, 0.7)} />
+                <Circle c={wP1} r={0.3} color={alpha(C.accent, 0.7)} />
+                {/* green ring: the end plugs in here; red: nothing to connect to under the finger */}
+                <Group opacity={okOpacity}>
+                  <Circle c={wP2} r={0.45} color={alpha(C.ok, 0.35)} />
+                  <Circle c={wP2} r={0.45} color={C.ok} style="stroke" strokeWidth={0.08} />
+                </Group>
+                <Group opacity={badOpacity}>
+                  <Circle c={wP2} r={0.4} color={alpha(C.danger, 0.25)} />
+                  <Circle c={wP2} r={0.4} color={C.danger} style="stroke" strokeWidth={0.08} />
+                </Group>
+              </Group>
+              <Group opacity={bendOn}>
+                <Path path={bendPath} style="stroke" strokeWidth={0.2} strokeCap="round" color={alpha(C.select, 0.8)}>
+                  <DashPathEffect intervals={[0.4, 0.25]} />
+                </Path>
+                <Circle c={wP2} r={0.36} color={alpha(C.select, 0.5)} />
               </Group>
               <Group opacity={marqueeOn}>
                 <Rect x={mx} y={my} width={mw} height={mh} color={alpha(C.accent, 0.12)} />

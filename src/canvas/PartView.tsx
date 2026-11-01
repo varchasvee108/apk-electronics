@@ -1,4 +1,4 @@
-import { BlurMask, Circle, DashPathEffect, Group, Line, Path, Rect, RoundedRect, vec } from '@shopify/react-native-skia';
+import { BlurMask, Circle, DashPathEffect, Group, Line, LinearGradient, Path, RadialGradient, Rect, RoundedRect, vec } from '@shopify/react-native-skia';
 import { memo, type ReactNode } from 'react';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import { LED_COLORS, type LedColor } from '@sim/models';
@@ -7,7 +7,7 @@ import { CHIPS } from '@sim/digital/chips';
 import { partDef, partBounds } from '@/model/parts';
 import type { PartInstance } from '@/model/types';
 import type { PartLive } from '@/sim/controller';
-import { C } from '@/theme';
+import { CANVAS as C } from '@/theme';
 import { Label, P, alpha } from './draw';
 
 export interface DragState {
@@ -77,6 +77,28 @@ function Glow({ x, y, color, b, r = 1.3 }: { x: number; y: number; color: string
   );
 }
 
+/** Cylindrical shading laid over a body: light from above, shadow underneath. */
+function Shade({ x, y, w, h, r = 0 }: { x: number; y: number; w: number; h: number; r?: number }) {
+  return (
+    <RoundedRect x={x} y={y} width={w} height={h} r={r}>
+      <LinearGradient
+        start={vec(0, y)}
+        end={vec(0, y + h)}
+        colors={['rgba(255,255,255,0.45)', 'rgba(255,255,255,0.08)', 'rgba(0,0,0,0)', 'rgba(0,0,0,0.22)']}
+        positions={[0, 0.3, 0.6, 1]}
+      />
+    </RoundedRect>
+  );
+}
+
+/** Mix a #rrggbb colour towards white (t > 0) or black (t < 0). */
+function tint(hex: string, t: number): string {
+  const h = hex.replace('#', '');
+  const c = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const m = c.map((v) => Math.round(t >= 0 ? v + (255 - v) * t : v * (1 + t)));
+  return `#${m.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('')}`;
+}
+
 function heatColor(base: string, load: number): string {
   if (load < 0.9) return base;
   return alpha('#E5484D', Math.min(0.85, (load - 0.9) / 1.5));
@@ -100,6 +122,7 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
             bands.map((c, i) => (
               <Rect key={i} x={1.05 + i * (bands.length === 5 ? 0.38 : 0.45) + (i === bands.length - 1 ? 0.25 : 0)} y={-0.36} width={0.18} height={0.72} color={c} />
             ))}
+          <Shade x={0.75} y={-0.36} w={2.5} h={0.72} r={0.34} />
           {failed && <Stroke d="M1.3 -0.3 L1.7 0.1 L2.1 -0.2 L2.6 0.3" color="#7A6A5A" w={0.06} />}
           {(load > 1 || failed) && <Smoke clock={clock} x={2} y={-0.8} />}
         </>
@@ -114,6 +137,7 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
           <Lead x1={0} y1={0} x2={4} y2={0} />
           <RoundedRect x={0.95} y={-0.3} width={2.1} height={0.6} r={0.2} color={failed ? '#3A3533' : body} />
           <Rect x={2.65} y={-0.3} width={0.2} height={0.6} color={part.type === 'zener' ? '#1F1F1F' : '#D7DCE2'} />
+          <Shade x={0.95} y={-0.3} w={2.1} h={0.6} r={0.2} />
         </>
       );
     }
@@ -128,46 +152,101 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
         </>
       );
     case 'cap': {
+      // ceramic disc: orange epoxy dip with the 3-digit code; a blue halo shows how charged it is
       const v = Math.abs(live?.v ?? 0);
       const f = Math.min(1, v / Math.max(1, num(p.vmax, 50) * 0.3));
+      const body = failed ? '#4E4038' : '#E29A35';
       return (
         <>
-          <Lead x1={0} y1={0} x2={0.7} y2={-0.2} />
-          <Lead x1={2} y1={0} x2={1.3} y2={-0.2} />
-          <Circle cx={1} cy={-0.35} r={0.62} color={failed ? '#5A4A3A' : '#E0A23A'} />
-          <Label x={1} y={-0.2} text={capCode(num(p.c, 1e-7))} size={0.36} align="center" color="#5A3A10" />
-          {powered && <Rect x={0.55} y={-1.15} width={0.9 * f} height={0.14} color={C.info} />}
+          <Lead x1={0} y1={0} x2={0.62} y2={-0.62} />
+          <Lead x1={2} y1={0} x2={1.38} y2={-0.62} />
+          <Path path={P('M0.5 -0.86 Q1 -0.3 1.5 -0.86 L1.3 -1.0 L0.7 -1.0 Z')} color={tint(body, -0.12)} />
+          <Circle cx={1} cy={-1.22} r={0.74}>
+            <RadialGradient c={vec(0.78, -1.45)} r={0.95} colors={failed ? ['#6A5A50', '#3A2E28'] : ['#F8CB78', '#E29A35', '#B8701E']} />
+          </Circle>
+          <Circle cx={1} cy={-1.22} r={0.74} color={alpha('#7A4A10', 0.35)} style="stroke" strokeWidth={0.05} />
+          <Label x={1} y={-1.08} text={capCode(num(p.c, 1e-7))} size={0.4} align="center" color={failed ? '#C9BFB8' : '#5A3410'} bold />
+          {powered && f > 0.02 && !failed && <Circle cx={1} cy={-1.22} r={0.86} color={alpha(C.info, 0.2 + 0.65 * f)} style="stroke" strokeWidth={0.09} />}
+          {failed && <Stroke d="M0.62 -1.6 L1.0 -1.2 L0.85 -0.95 M1.1 -1.75 L1.35 -1.35" color="#1E1A18" w={0.07} />}
         </>
       );
     }
     case 'ecap': {
+      // electrolytic can standing on its legs: blue sleeve, light stripe with "−" marks over the negative lead
       const v = live?.v ?? 0;
       const f = Math.min(1, Math.abs(v) / Math.max(1, num(p.vmax, 25) * 0.6));
+      const top = -2.55;
+      const h = 2.25;
+      const sleeve = failed ? ['#3A2A2A', '#6B4A4A', '#3A2A2A'] : ['#0F1F45', '#2F5BB5', '#4A7BDB', '#24479A', '#0F1F45'];
       return (
         <>
-          <Circle cx={1} cy={0} r={1.15} color={failed ? '#6B4A4A' : '#24427E'} />
-          <Path path={P('M1 -1.15 A1.15 1.15 0 0 1 1 1.15 L1.55 1.03 A1.15 1.15 0 0 0 1.55 -1.03 Z')} color="#C9D3E6" />
-          <Circle cx={1} cy={0} r={0.55} color={alpha('#FFFFFF', 0.12)} />
-          {powered && <Circle cx={1} cy={0} r={0.5 * f + 0.02} color={alpha(v >= 0 ? '#7FB8FF' : '#FF8A8A', 0.85)} />}
-          <Label x={0.45} y={0.17} text="+" size={0.55} color="#FFFFFF" bold />
-          {failed && <Stroke d="M0.4 -0.6 L1.6 0.6 M1.6 -0.6 L0.4 0.6" color="#FFB4B4" w={0.12} />}
+          <Lead x1={0} y1={0} x2={0.45} y2={-0.32} />
+          <Lead x1={2} y1={0} x2={1.55} y2={-0.32} />
+          {/* rubber bung */}
+          <RoundedRect x={0.0} y={-0.45} width={2.0} height={0.2} r={0.08} color="#2A2C30" />
+          {/* can */}
+          <RoundedRect x={-0.15} y={top} width={2.3} height={h} r={0.28}>
+            <LinearGradient start={vec(-0.15, 0)} end={vec(2.15, 0)} colors={sleeve} />
+          </RoundedRect>
+          {/* negative stripe */}
+          {!failed && (
+            <Rect x={1.32} y={top + 0.12} width={0.5} height={h - 0.24}>
+              <LinearGradient start={vec(1.32, 0)} end={vec(1.82, 0)} colors={['#B9C6DE', '#E6ECF6', '#AEBCD6']} />
+            </Rect>
+          )}
+          {!failed && [0.55, 1.2, 1.85].map((dy) => <Rect key={dy} x={1.45} y={top + dy} width={0.24} height={0.08} color="#24479A" />)}
+          {/* crimped top with the vent */}
+          <RoundedRect x={-0.15} y={top} width={2.3} height={0.28} r={0.12}>
+            <LinearGradient start={vec(-0.15, 0)} end={vec(2.15, 0)} colors={['#8D96A3', '#E9EDF2', '#A9B1BC']} />
+          </RoundedRect>
+          {failed && <Path path={P(`M-0.1 ${top + 0.1} Q1 ${top - 0.9} 2.1 ${top + 0.1} Z`)} color="#8D96A3" />}
+          {!failed && <Label x={0.58} y={top + 1.05} text={formatEng(num(p.c, 100e-6), 'F')} size={0.36} align="center" color="#EAF0FF" bold />}
+          {!failed && <Label x={0.58} y={top + 1.6} text={`${num(p.vmax, 25)}V`} size={0.3} align="center" color="#C7D5F5" />}
+          <Shade x={-0.15} y={top} w={2.3} h={h} r={0.28} />
+          {/* charge gauge above the can */}
+          {powered && !failed && (
+            <>
+              <RoundedRect x={-0.1} y={top - 0.42} width={2.2} height={0.16} r={0.08} color={alpha('#24479A', 0.18)} />
+              <RoundedRect x={-0.1} y={top - 0.42} width={Math.max(0.16, 2.2 * f)} height={0.16} r={0.08} color={v >= 0 ? C.info : C.danger} />
+            </>
+          )}
+          {failed && <Smoke clock={clock} x={1} y={top - 0.6} />}
         </>
       );
     }
     case 'led':
     case 'photodiode': {
+      // 5 mm LED from the side: tinted epoxy dome on a flange (flat on the cathode side), anvil and post inside
       const isLed = part.type === 'led';
       const color = isLed ? LED_COLORS[(str(p.color, 'red') as LedColor) ?? 'red']?.rgb ?? '#ff3b30' : '#2C2F35';
-      const b = isLed && !failed ? num(live?.extra.brightness, 0) : 0;
+      const b = isLed && !failed ? Math.min(1.2, num(live?.extra.brightness, 0)) : 0;
+      const lit = Math.min(1, b);
+      const dome = 'M-0.08 -0.62 L-0.08 -1.38 A0.58 0.58 0 0 1 1.08 -1.38 L1.08 -0.62 Z';
+      const epoxy = failed ? ['#5A5A5A', '#8A8A8A', '#4A4A4A'] : [tint(color, -0.35), tint(color, 0.15 + 0.6 * lit), tint(color, -0.2)];
       return (
         <>
-          <Lead x1={0} y1={0} x2={0.2} y2={-0.5} />
-          <Lead x1={1} y1={0} x2={0.8} y2={-0.5} />
-          {isLed && <Glow x={0.5} y={-0.75} color={color} b={b} r={1.6} />}
-          <Circle cx={0.5} cy={-0.75} r={0.75} color={failed ? '#6E6E6E' : alpha(isLed ? color : '#2C2F35', isLed ? 0.55 + 0.45 * Math.min(1, b) : 1)} />
-          <Rect x={1.18} y={-1.35} width={0.1} height={1.2} color={failed ? '#555' : alpha('#000000', 0.25)} />
-          <Circle cx={0.3} cy={-1.0} r={0.18} color={alpha('#FFFFFF', 0.55 + 0.4 * Math.min(1, b))} />
-          {failed && <Stroke d="M0.1 -1.15 L0.9 -0.35 M0.9 -1.15 L0.1 -0.35" color="#2A2A2A" w={0.12} />}
+          <Lead x1={0} y1={0} x2={0.28} y2={-0.5} />
+          <Lead x1={1} y1={0} x2={0.72} y2={-0.5} />
+          {isLed && b > 0.02 && (
+            <Circle cx={0.5} cy={-1.2} r={1.1 + 0.9 * lit} color={alpha(color, 0.25 + 0.45 * lit)}>
+              <BlurMask blur={0.7} style="normal" />
+            </Circle>
+          )}
+          <Path path={P(dome)} opacity={isLed ? 0.82 + 0.18 * lit : 1}>
+            <LinearGradient start={vec(-0.08, 0)} end={vec(1.08, 0)} colors={epoxy} />
+          </Path>
+          {/* lead frame inside the epoxy: post (anode) and the larger anvil (cathode) */}
+          <Rect x={0.24} y={-1.1} width={0.08} height={0.5} color={alpha('#3A3A3A', 0.45)} />
+          <Path path={P('M0.58 -0.6 L0.58 -0.98 L0.86 -1.16 L0.86 -0.6 Z')} color={alpha('#2A2A2A', 0.45)} />
+          {isLed && lit > 0.05 && (
+            <Circle cx={0.5} cy={-1.3} r={0.22 + 0.2 * lit} color={alpha('#FFFFFF', 0.5 + 0.45 * lit)}>
+              <BlurMask blur={0.15} style="normal" />
+            </Circle>
+          )}
+          <Stroke d="M0.12 -0.75 L0.12 -1.35 A0.42 0.42 0 0 1 0.42 -1.78" color={alpha('#FFFFFF', 0.55)} w={0.08} />
+          {/* flange, flattened over the cathode */}
+          <Path path={P('M-0.2 -0.66 L1.08 -0.66 L1.08 -0.46 L-0.2 -0.46 Q-0.26 -0.56 -0.2 -0.66 Z')} color={failed ? '#555' : tint(color, -0.25)} opacity={0.95} />
+          {failed && <Stroke d="M0.15 -1.5 L0.5 -1.05 L0.35 -0.8 M0.7 -1.65 L0.85 -1.2" color="#1E1E1E" w={0.08} />}
         </>
       );
     }
@@ -246,6 +325,7 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
           <RoundedRect x={0.95} y={-0.38} width={2.1} height={0.76} r={0.3} color="#E2EAF2" />
           <Rect x={0.6} y={-0.42} width={0.45} height={0.84} color="#C3C8CF" />
           <Rect x={2.95} y={-0.42} width={0.45} height={0.84} color="#C3C8CF" />
+          <Shade x={0.6} y={-0.42} w={2.8} h={0.84} r={0.1} />
           {failed ? (
             <>
               <Circle cx={2} cy={0} r={0.32} color={alpha('#3A3A3A', 0.45)} />
@@ -258,22 +338,65 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
         </>
       );
     case 'lamp': {
+      // miniature screw bulb in a holder with two screw terminals; filament and glass glow with the light output
       const b = failed ? 0 : num(live?.extra.brightness, 0);
+      const lit = Math.min(1, b);
+      const glass = 'M1.48 -1.62 C1.48 -2.02 1.02 -2.32 1.02 -2.95 A0.98 0.98 0 1 1 2.98 -2.95 C2.98 -2.32 2.52 -2.02 2.52 -1.62 Z';
       return (
         <>
-          <Lead x1={0} y1={0} x2={0.7} y2={-0.55} />
-          <Lead x1={4} y1={0} x2={3.3} y2={-0.55} />
-          <RoundedRect x={0.45} y={-1.05} width={3.1} height={0.85} r={0.15} color="#3A3E44" />
-          <Rect x={1.3} y={-1.6} width={1.4} height={0.6} color="#B9BEC6" />
-          <Glow x={2} y={-2.5} color="#FFC94D" b={b} r={1.9} />
-          <Circle cx={2} cy={-2.5} r={0.98} color={b > 0.03 ? alpha('#FFF1C9', 0.6 + 0.4 * Math.min(1, b)) : alpha('#E3E9F0', 0.95)} />
-          <Stroke d="M1.65 -1.6 L1.7 -2.45 M2.35 -1.6 L2.3 -2.45" color="#8A8F96" w={0.05} />
+          <Lead x1={0} y1={0} x2={0.75} y2={-0.5} />
+          <Lead x1={4} y1={0} x2={3.25} y2={-0.5} />
+          {/* holder */}
+          <RoundedRect x={0.35} y={-1.05} width={3.3} height={0.8} r={0.22}>
+            <LinearGradient start={vec(0, -1.05)} end={vec(0, -0.25)} colors={['#555B64', '#2E3238', '#202328']} />
+          </RoundedRect>
+          {[0.78, 3.22].map((cx) => (
+            <Group key={cx}>
+              <Circle cx={cx} cy={-0.65} r={0.22}>
+                <RadialGradient c={vec(cx - 0.06, -0.72)} r={0.25} colors={['#F2DC92', '#C9A64A', '#8F7428']} />
+              </Circle>
+              <Line p1={vec(cx - 0.14, -0.65)} p2={vec(cx + 0.14, -0.65)} color="#6E5A20" strokeWidth={0.05} />
+            </Group>
+          ))}
+          {b > 0.03 && (
+            <Circle cx={2} cy={-2.9} r={1.6 + 1.2 * lit} color={alpha('#FFC94D', 0.25 + 0.5 * lit)}>
+              <BlurMask blur={0.9} style="normal" />
+            </Circle>
+          )}
+          {/* glass envelope */}
+          <Path path={P(glass)}>
+            {b > 0.03 ? (
+              <RadialGradient c={vec(2, -2.75)} r={1.3} colors={[alpha('#FFFFFF', 0.95), alpha('#FFF0B8', 0.75 + 0.2 * lit), alpha('#FFD36B', 0.45 + 0.3 * lit)]} />
+            ) : (
+              <RadialGradient c={vec(1.7, -3.2)} r={1.4} colors={[alpha('#FFFFFF', 0.85), alpha('#E6ECF3', 0.6), alpha('#C9D2DD', 0.55)]} />
+            )}
+          </Path>
+          <Path path={P(glass)} color={failed ? alpha('#5A4A3A', 0.6) : alpha('#9AA6B4', 0.8)} style="stroke" strokeWidth={0.05} />
+          {/* support wires and coiled filament */}
+          <Stroke d="M1.8 -1.62 L1.72 -2.78 M2.2 -1.62 L2.28 -2.78" color="#8A8F96" w={0.045} />
           <Stroke
-            d={failed ? 'M1.7 -2.45 L1.85 -2.68 M2.15 -2.68 L2.3 -2.45' : 'M1.7 -2.45 L1.82 -2.7 L1.94 -2.45 L2.06 -2.7 L2.18 -2.45 L2.3 -2.45'}
-            color={b > 0.05 ? '#FF9F1C' : '#6B6F76'}
-            w={0.07}
+            d={
+              failed
+                ? 'M1.72 -2.78 L1.86 -2.98 M2.14 -2.9 L2.28 -2.78'
+                : 'M1.72 -2.78 Q1.78 -3.02 1.84 -2.78 Q1.9 -3.02 1.96 -2.78 Q2.02 -3.02 2.08 -2.78 Q2.14 -3.02 2.2 -2.78 Q2.24 -2.95 2.28 -2.78'
+            }
+            color={b > 0.05 ? tint('#FF9F1C', 0.7 * lit) : '#6B6F76'}
+            w={0.06}
           />
-          {failed && <Smoke clock={clock} x={2} y={-3.8} />}
+          {b > 0.05 && (
+            <Circle cx={2} cy={-2.88} r={0.3 + 0.25 * lit} color={alpha('#FFFFFF', 0.4 + 0.5 * lit)}>
+              <BlurMask blur={0.18} style="normal" />
+            </Circle>
+          )}
+          <Stroke d="M1.35 -2.4 Q1.25 -3.25 1.75 -3.65" color={alpha('#FFFFFF', 0.75)} w={0.08} />
+          {/* threaded base */}
+          <RoundedRect x={1.42} y={-1.68} width={1.16} height={0.66} r={0.08}>
+            <LinearGradient start={vec(1.42, 0)} end={vec(2.58, 0)} colors={['#8E959E', '#E8EBEF', '#9BA2AB']} />
+          </RoundedRect>
+          {[-1.52, -1.34, -1.16].map((y) => (
+            <Line key={y} p1={vec(1.44, y)} p2={vec(2.56, y + 0.06)} color={alpha('#5C626B', 0.7)} strokeWidth={0.04} />
+          ))}
+          {failed && <Smoke clock={clock} x={2} y={-4.1} />}
         </>
       );
     }
@@ -383,9 +506,13 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
       const on = (live?.v ?? 0) > 2;
       return (
         <>
-          <Circle cx={1} cy={0} r={1.25} color="#1E2125" />
-          <Circle cx={1} cy={0} r={0.25} color="#3A3E44" />
-          <Label x={0.1} y={-0.55} text="+" size={0.5} color="#E9ECEF" bold />
+          <Circle cx={1} cy={0} r={1.25}>
+            <RadialGradient c={vec(0.7, -0.35)} r={1.5} colors={['#4A4F57', '#24272C', '#141619']} />
+          </Circle>
+          <Circle cx={1} cy={0} r={0.85} color={alpha('#000000', 0.35)} style="stroke" strokeWidth={0.06} />
+          <Circle cx={1} cy={0} r={0.28} color="#0B0C0E" />
+          <Circle cx={1} cy={0} r={0.28} color={alpha('#FFFFFF', 0.15)} style="stroke" strokeWidth={0.04} />
+          <Label x={0.12} y={-0.5} text="+" size={0.5} color="#E9ECEF" bold />
           {on && <Stroke d="M2.5 -0.7 Q2.9 0 2.5 0.7 M2.9 -1.1 Q3.5 0 2.9 1.1" color={C.accent} w={0.1} />}
         </>
       );
@@ -503,6 +630,19 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
             </>
           )}
           <Label x={1.5} y={4.7} text={`${v} V`} size={0.9} align="center" color="#FFFFFF" bold />
+          {!!p.drain && (
+            <>
+              <RoundedRect x={-0.3} y={5.5} width={3.6} height={0.55} r={0.15} color={alpha('#FFFFFF', 0.2)} />
+              <RoundedRect
+                x={-0.3}
+                y={5.5}
+                width={Math.max(0.2, 3.6 * (powered && live ? num(live.extra.charge, 1) : 1))}
+                height={0.55}
+                r={0.15}
+                color={(powered && live ? num(live.extra.charge, 1) : 1) > 0.2 ? '#4ADE80' : C.danger}
+              />
+            </>
+          )}
           <Label x={0} y={1.85} text="+" size={0.7} align="center" color={nine ? '#2A2D33' : '#FFFFFF'} bold />
           <Label x={3} y={1.85} text="−" size={0.7} align="center" color={nine ? '#2A2D33' : '#FFFFFF'} bold />
         </>
@@ -579,6 +719,291 @@ function BBBody({ part, live, clock, powered }: { part: PartInstance; live: Part
           <Label x={2.5} y={5.1} text={`1 : ${num(p.n, 0.5)}`} size={0.5} align="center" color={C.ink2} />
         </>
       );
+    case 'piezo': {
+      const on = !!live?.extra.sounding;
+      return (
+        <>
+          <Circle cx={1} cy={0} r={1.25}>
+            <RadialGradient c={vec(0.7, -0.35)} r={1.5} colors={['#3A3F46', '#1B1E22', '#101214']} />
+          </Circle>
+          <Circle cx={1} cy={0} r={0.95} color={alpha('#FFFFFF', 0.08)} style="stroke" strokeWidth={0.05} />
+          <Circle cx={1} cy={0} r={0.2} color="#050506" />
+          <Label x={0.12} y={-0.5} text="+" size={0.5} color="#E9ECEF" bold />
+          <Label x={1} y={0.85} text="PIEZO" size={0.26} align="center" color="#9AA1AB" />
+          {on && <Stroke d="M2.5 -0.7 Q2.9 0 2.5 0.7 M2.9 -1.1 Q3.5 0 2.9 1.1" color={C.accent} w={0.1} />}
+          {on && <Label x={1} y={-1.55} text={formatEng(num(live?.extra.freq, 0), 'Hz')} size={0.4} align="center" color={C.accentInk} bold />}
+        </>
+      );
+    }
+    case 'lcd1602': {
+      const lit = Math.min(1, num(live?.els.bl?.extra?.brightness, 0) * 1.5);
+      const on = !!live?.extra.on;
+      const contrast = num(live?.extra.contrast, 1);
+      const lines = [String(live?.extra.line1 ?? ''), String(live?.extra.line2 ?? '')];
+      const screen = lit > 0.05 ? tint('#8FC73E', 0.25 * lit) : '#5F6B3E';
+      const ink = alpha('#13210A', on ? Math.max(0.15, contrast) : 0);
+      return (
+        <>
+          <RoundedRect x={-1.6} y={-8.2} width={18.2} height={7.9} r={0.25}>
+            <LinearGradient start={vec(0, -8.2)} end={vec(0, -0.3)} colors={['#2A7F4F', '#1E6A40']} />
+          </RoundedRect>
+          {[[-1, -7.6], [16, -7.6], [-1, -0.95], [16, -0.95]].map(([x, y], i) => (
+            <Circle key={i} cx={x} cy={y} r={0.3} color="#C8B88A" />
+          ))}
+          <Rect x={-0.45} y={-0.75} width={15.9} height={0.5} color="#1E2125" />
+          {Array.from({ length: 16 }, (_, i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.5} />
+          ))}
+          <RoundedRect x={-0.4} y={-7.1} width={15.8} height={5.6} r={0.15} color="#16181B" />
+          <RoundedRect x={0} y={-6.7} width={15} height={4.8} r={0.1} color={screen} />
+          {lit > 0.05 && <RoundedRect x={0} y={-6.7} width={15} height={4.8} r={0.1} color={alpha('#D8FF8A', 0.18 * lit)} />}
+          {[0, 1].map((r) =>
+            Array.from({ length: 16 }, (_, c) => (
+              <Rect key={`${r}.${c}`} x={0.2 + c * 0.915} y={-6.35 + r * 2.25} width={0.78} height={1.75} color={alpha('#13210A', on ? 0.06 : 0.03)} />
+            )),
+          )}
+          {on &&
+            lines.map((ln, r) =>
+              Array.from(ln.slice(0, 16)).map((ch, c) =>
+                ch === ' ' ? null : <Label key={`t${r}.${c}`} x={0.59 + c * 0.915} y={-4.95 + r * 2.25} text={ch} size={1.15} align="center" color={ink} bold />,
+              ),
+            )}
+          <Label x={7.5} y={-7.45} text="16×2 LCD" size={0.36} align="center" color="#CFE9D9" />
+        </>
+      );
+    }
+    case 'stepper': {
+      const ang = (num(live?.extra.angle, 0) * Math.PI) / 180;
+      const wires = ['#F08C1E', '#F2D21B', '#F27BA6', '#2F7BFF', '#D23B2E'];
+      return (
+        <>
+          {wires.map((c, i) => (
+            <Line key={i} p1={vec(i, 0)} p2={vec(1.2 + i * 0.4, -1.3)} color={c} strokeWidth={0.14} strokeCap="round" />
+          ))}
+          <RoundedRect x={-0.3} y={-0.7} width={4.6} height={0.7} r={0.1} color="#F3F3F0" />
+          <Circle cx={2} cy={-4.2} r={2.7}>
+            <RadialGradient c={vec(1.3, -5)} r={3.4} colors={['#E6EBF0', '#AEB8C3', '#7D8792']} />
+          </Circle>
+          <RoundedRect x={-1.2} y={-4.6} width={6.4} height={0.8} r={0.4} color="#9BA5B0" />
+          <Circle cx={-0.85} cy={-4.2} r={0.25} color="#5C646D" />
+          <Circle cx={4.85} cy={-4.2} r={0.25} color="#5C646D" />
+          <Circle cx={2} cy={-5.2} r={1.25} color="#C9D0D7" />
+          <Circle cx={2} cy={-5.2} r={0.5}>
+            <RadialGradient c={vec(1.85, -5.35)} r={0.6} colors={['#F6E3A1', '#C9A64A']} />
+          </Circle>
+          <Group transform={[{ translateX: 2 }, { translateY: -5.2 }, { rotate: ang }]}>
+            <RoundedRect x={-0.12} y={-1.2} width={0.24} height={1.2} r={0.1} color={C.danger} />
+          </Group>
+          <Label x={2} y={-2.2} text="28BYJ-48" size={0.42} align="center" color="#3C434B" bold />
+          <Label x={2} y={-1.55} text={`${Math.round(num(live?.extra.angle, 0))}°`} size={0.42} align="center" color="#3C434B" />
+        </>
+      );
+    }
+    case 'hcsr04': {
+      const echo = !!live?.extra.echo;
+      return (
+        <>
+          {[0, 1, 2, 3].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.6} />
+          ))}
+          <RoundedRect x={-3.4} y={-5.2} width={9.8} height={4.7} r={0.2} color="#1C5FA8" />
+          {[-0.9, 3.9].map((cx) => (
+            <Group key={cx}>
+              <Circle cx={cx} cy={-2.85} r={1.95}>
+                <RadialGradient c={vec(cx - 0.5, -3.4)} r={2.3} colors={['#F2F4F6', '#B7BEC6', '#8A929B']} />
+              </Circle>
+              <Circle cx={cx} cy={-2.85} r={1.45} color="#2B2F36" />
+              <Circle cx={cx} cy={-2.85} r={1.45} color={alpha('#FFFFFF', 0.08)} style="stroke" strokeWidth={0.25}>
+                <DashPathEffect intervals={[0.12, 0.12]} />
+              </Circle>
+            </Group>
+          ))}
+          <RoundedRect x={0.95} y={-4.85} width={1.1} height={0.5} r={0.25} color="#C9CED5" />
+          <Label x={1.5} y={-0.8} text="HC-SR04" size={0.38} align="center" color="#E8F0FA" bold />
+          {['VCC', 'TRIG', 'ECHO', 'GND'].map((t, i) => (
+            <Label key={t} x={i} y={-1.45} text={t} size={0.2} align="center" color="#CFE0F5" />
+          ))}
+          {echo && <Stroke d="M-0.9 -5.6 Q1.5 -6.6 3.9 -5.6" color={C.accent} w={0.1} />}
+        </>
+      );
+    }
+    case 'pir': {
+      const det = !!live?.extra.detected;
+      return (
+        <>
+          {[0, 1, 2].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.6} />
+          ))}
+          <RoundedRect x={-1.6} y={-5.2} width={5.2} height={4.7} r={0.3} color="#2E7D4F" />
+          <Circle cx={1} cy={-2.85} r={2.1}>
+            <RadialGradient c={vec(0.4, -3.6)} r={2.6} colors={['#FFFFFF', '#ECEFF2', '#C9CFD6']} />
+          </Circle>
+          {[0.7, 1.3, 1.85].map((r) => (
+            <Circle key={r} cx={1} cy={-2.85} r={r} color={alpha('#9AA3AD', 0.55)} style="stroke" strokeWidth={0.04} />
+          ))}
+          <Line p1={vec(-1.1, -2.85)} p2={vec(3.1, -2.85)} color={alpha('#9AA3AD', 0.4)} strokeWidth={0.04} />
+          <Line p1={vec(1, -4.95)} p2={vec(1, -0.75)} color={alpha('#9AA3AD', 0.4)} strokeWidth={0.04} />
+          {det && (
+            <Circle cx={1} cy={-2.85} r={2.4} color={alpha('#FF6B3D', 0.35)}>
+              <BlurMask blur={0.4} style="normal" />
+            </Circle>
+          )}
+          <Label x={1} y={-0.75} text={det ? 'MOTION' : 'PIR'} size={0.32} align="center" color={det ? '#FFD9C9' : '#D3EBDD'} bold />
+        </>
+      );
+    }
+    case 'irobstacle': {
+      const det = !!live?.extra.detected;
+      return (
+        <>
+          {[0, 1, 2].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.6} />
+          ))}
+          <RoundedRect x={-0.8} y={-6} width={3.6} height={5.5} r={0.25} color="#1F2A6B" />
+          <RoundedRect x={-0.3} y={-6.3} width={0.8} height={1.4} r={0.4} color={alpha('#E8EEF7', 0.9)} />
+          <RoundedRect x={1.5} y={-6.3} width={0.8} height={1.4} r={0.4} color="#15171A" />
+          <Circle cx={1} cy={-3.4} r={0.55} color="#2F6FE0" />
+          <Line p1={vec(0.7, -3.4)} p2={vec(1.3, -3.4)} color="#E8EEF7" strokeWidth={0.1} />
+          <Circle cx={0} cy={-1.7} r={0.25} color={det ? '#3CE07A' : '#245A35'} />
+          {det && <Glow x={0} y={-1.7} color="#3CE07A" b={0.6} r={0.5} />}
+          <Label x={1} y={-0.85} text="IR" size={0.36} align="center" color="#DCE3FF" bold />
+        </>
+      );
+    }
+    case 'hall':
+      return (
+        <>
+          {[0, 1, 2].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.4} />
+          ))}
+          <Path path={P('M-0.35 -0.35 L2.35 -0.35 L2.35 -1.3 L-0.35 -1.3 Z')} color={live?.extra.detected ? '#2C3A55' : '#26292E'} />
+          <Label x={1} y={-0.62} text="3144" size={0.36} align="center" color="#E9ECEF" />
+          {live?.extra.detected ? <Circle cx={2.3} cy={-1.4} r={0.18} color={C.info} /> : null}
+        </>
+      );
+    case 'joystick': {
+      const jx = Math.max(-1, Math.min(1, num(p.x, 0)));
+      const jy = Math.max(-1, Math.min(1, num(p.y, 0)));
+      const pressed = !!p.pressed;
+      return (
+        <>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.6} />
+          ))}
+          <RoundedRect x={-0.8} y={-6.4} width={5.6} height={5.9} r={0.25} color="#22252A" />
+          <RoundedRect x={0.1} y={-5.5} width={3.8} height={3.8} r={0.4} color="#3A3F46" />
+          <Circle cx={2 + jx * 0.9} cy={-3.6 - jy * 0.9} r={1.35}>
+            <RadialGradient c={vec(1.6 + jx * 0.9, -4 - jy * 0.9)} r={1.6} colors={pressed ? ['#4C5AAE', '#2A3270'] : ['#5D646E', '#24272C']} />
+          </Circle>
+          <Circle cx={2 + jx * 0.9} cy={-3.6 - jy * 0.9} r={0.9} color={alpha('#000000', 0.25)} style="stroke" strokeWidth={0.08} />
+          {['GND', '5V', 'X', 'Y', 'SW'].map((t, i) => (
+            <Label key={t} x={i} y={-0.85} text={t} size={0.22} align="center" color="#C8CDD4" />
+          ))}
+        </>
+      );
+    }
+    case 'soil':
+    case 'gas':
+    case 'soundsensor': {
+      const kind = part.type;
+      return (
+        <>
+          {[0, 1, 2].map((i) => (
+            <Lead key={i} x1={i} y1={0} x2={i} y2={-0.6} />
+          ))}
+          <RoundedRect x={-1.2} y={-5.6} width={4.4} height={5.1} r={0.25} color={kind === 'soil' ? '#B8322E' : '#1C5FA8'} />
+          {kind === 'soil' && (
+            <>
+              <Rect x={-0.4} y={-8.6} width={0.7} height={4.2} color="#C9B27A" />
+              <Rect x={1.7} y={-8.6} width={0.7} height={4.2} color="#C9B27A" />
+              <Rect x={-0.6} y={-5.3} width={3.2} height={1.4} color="#C9B27A" />
+              <Label x={1} y={-2.2} text={`${Math.round(num(p.moisture, 30))}%`} size={0.55} align="center" color="#FFE3E0" bold />
+            </>
+          )}
+          {kind === 'gas' && (
+            <>
+              <Circle cx={1} cy={-3.2} r={1.75}>
+                <RadialGradient c={vec(0.5, -3.8)} r={2} colors={['#E3E7EC', '#9EA6AF']} />
+              </Circle>
+              <Circle cx={1} cy={-3.2} r={1.2} color={alpha('#4A5058', 0.85)} style="stroke" strokeWidth={0.3}>
+                <DashPathEffect intervals={[0.1, 0.1]} />
+              </Circle>
+              <Label x={1} y={-0.9} text="MQ-2" size={0.36} align="center" color="#E8F0FA" bold />
+            </>
+          )}
+          {kind === 'soundsensor' && (
+            <>
+              <Circle cx={1} cy={-3.6} r={1.2}>
+                <RadialGradient c={vec(0.7, -4)} r={1.4} colors={['#ECEFF2', '#9BA3AC']} />
+              </Circle>
+              <Circle cx={1} cy={-3.6} r={0.75} color="#2B2F36" />
+              <Circle cx={1} cy={-1.6} r={0.4} color="#2F6FE0" />
+            </>
+          )}
+          {['VCC', 'GND', 'AO'].map((t, i) => (
+            <Label key={t} x={i} y={-0.8} text={kind === 'gas' ? '' : t} size={0.22} align="center" color="#F0F3F7" />
+          ))}
+        </>
+      );
+    }
+    case 'tilt': {
+      const tilted = !!p.tilted;
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0.6} y2={-0.5} />
+          <Lead x1={2} y1={0} x2={1.4} y2={-0.5} />
+          <Group origin={vec(1, -1.4)} transform={[{ rotate: tilted ? 0.6 : 0 }]}>
+            <RoundedRect x={0.35} y={-2.35} width={1.3} height={1.95} r={0.3}>
+              <LinearGradient start={vec(0.35, 0)} end={vec(1.65, 0)} colors={['#2A2D33', '#5A606A', '#24272C']} />
+            </RoundedRect>
+            <Circle cx={tilted ? 1.25 : 1} cy={tilted ? -1.9 : -0.85} r={0.28} color="#C9CED5" />
+          </Group>
+        </>
+      );
+    }
+    case 'reed': {
+      const closed = num(p.gap, 30) <= 10;
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0.7} y2={0} />
+          <Lead x1={4} y1={0} x2={3.3} y2={0} />
+          <RoundedRect x={0.6} y={-0.38} width={2.8} height={0.76} r={0.38} color={alpha('#DCEAF5', 0.75)} />
+          <RoundedRect x={0.6} y={-0.38} width={2.8} height={0.76} r={0.38} color={alpha('#9FB3C4', 0.9)} style="stroke" strokeWidth={0.05} />
+          <Line p1={vec(0.7, 0)} p2={vec(2.15, closed ? 0.02 : -0.12)} color="#7D6A3A" strokeWidth={0.09} />
+          <Line p1={vec(3.3, 0)} p2={vec(1.85, closed ? -0.02 : 0.12)} color="#7D6A3A" strokeWidth={0.09} />
+          <Shade x={0.6} y={-0.38} w={2.8} h={0.76} r={0.38} />
+        </>
+      );
+    }
+    case 'flex': {
+      const bend = Math.max(0, Math.min(90, num(p.bend, 0)));
+      const k = bend / 90;
+      const d = `M0.5 -0.5 L0.5 -3 Q0.5 ${-5 + k} ${0.5 - 3.5 * k} ${-6.6 + 2.2 * k}`;
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0.4} y2={-0.55} />
+          <Lead x1={1} y1={0} x2={0.6} y2={-0.55} />
+          <Stroke d={d} color="#3A3F46" w={0.95} />
+          <Stroke d={d} color="#C7A54A" w={0.35} />
+          <Label x={1.1} y={-0.9} text={`${Math.round(bend)}°`} size={0.34} color={C.ink3} />
+        </>
+      );
+    }
+    case 'fsr': {
+      const f = Math.min(1, num(p.force, 0) / 2000);
+      return (
+        <>
+          <Lead x1={0} y1={0} x2={0.35} y2={-0.5} />
+          <Lead x1={1} y1={0} x2={0.65} y2={-0.5} />
+          <Rect x={0.15} y={-2.3} width={0.7} height={1.85} color="#2A2D33" />
+          <Circle cx={0.5} cy={-3.3} r={1.25} color="#2A2D33" />
+          {[0.3, 0.55, 0.8, 1.05].map((r) => (
+            <Circle key={r} cx={0.5} cy={-3.3} r={r} color={alpha('#9AA1AB', 0.5)} style="stroke" strokeWidth={0.04} />
+          ))}
+          {f > 0.01 && <Circle cx={0.5} cy={-3.3} r={0.3 + 0.9 * f} color={alpha(C.info, 0.25 + 0.4 * f)} />}
+        </>
+      );
+    }
     case 'ground':
       return <GroundSymbol />;
     case 'arduino':
@@ -878,6 +1303,24 @@ function SchBody({ part, live }: { part: PartInstance; live: PartLive | null }) 
           <PinDot x={3} y={0} />
         </>
       );
+    case 'tilt':
+    case 'reed':
+      return twoTerm(
+        part.type === 'reed' ? 4 : 2,
+        <Stroke d={(part.type === 'reed' ? num(p.gap, 30) <= 10 : !p.tilted) ? 'M0 0 L0.3 0 M0.3 0 L1.3 -0.05 M1.3 0 L1.6 0' : 'M0 0 L0.3 0 M0.3 0 L1.25 -0.45 M1.3 0 L1.6 0'} />,
+        part.type === 'reed' ? undefined : 0.2,
+      );
+    case 'flex':
+    case 'fsr':
+      return twoTerm(
+        1,
+        <>
+          <Stroke d="M0 0 L0.15 0 L0.3 -0.3 L0.55 0.3 L0.8 -0.3 L1.05 0.3 L1.3 -0.3 L1.45 0 L1.6 0" />
+          <Stroke d="M0.2 0.6 L1.4 -0.6 M1.4 -0.6 L1.15 -0.55 M1.4 -0.6 L1.35 -0.35" w={0.06} />
+        </>,
+        -0.3,
+      );
+    case 'piezo':
     case 'buzzer':
       return twoTerm(2, <Stroke d="M0 0 L0.45 0 M0.45 -0.35 L0.75 -0.35 L0.75 0.35 L0.45 0.35 Z M0.75 -0.35 L1.15 -0.7 L1.15 0.7 L0.75 0.35 M1.15 0 L1.6 0" w={0.07} />, 0.2);
     case 'relay':

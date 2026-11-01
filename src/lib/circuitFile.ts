@@ -27,6 +27,7 @@ export function parseCircuit(text: string): CircuitDoc {
     if (!w || !w.a || !w.b || typeof w.a.x !== 'number' || typeof w.b.y !== 'number') throw new Error('A wire in this file is malformed.');
     w.id = w.id || newId('w');
     w.color = w.color || '#3e63dd';
+    if (w.via && (typeof w.via.x !== 'number' || typeof w.via.y !== 'number')) delete w.via;
   }
   const now = Date.now();
   return {

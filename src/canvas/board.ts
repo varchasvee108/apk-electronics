@@ -1,6 +1,6 @@
 import { Skia, createPicture, type SkPicture } from '@shopify/react-native-skia';
 import { BB, RAIL_XS, ROW_LETTERS, allHoles } from '@/model/breadboard';
-import { C } from '@/theme';
+import { CANVAS as C } from '@/theme';
 import { fonts } from './draw';
 
 let boardPic: SkPicture | null = null;

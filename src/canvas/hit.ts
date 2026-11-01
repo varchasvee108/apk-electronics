@@ -32,14 +32,30 @@ export function wireControl(a: Pt, b: Pt): Pt {
   return { x: (a.x + b.x) / 2 + nx * bow * sgn, y: (a.y + b.y) / 2 + ny * bow * sgn };
 }
 
+/** Quadratic control point of a wire: through its bend point when it has one, else the default arc. */
+export function wireCurveControl(wire: Pick<Wire, 'a' | 'b' | 'via'>): Pt {
+  if (wire.via) return { x: 2 * wire.via.x - (wire.a.x + wire.b.x) / 2, y: 2 * wire.via.y - (wire.a.y + wire.b.y) / 2 };
+  return wireControl(wire.a, wire.b);
+}
+
+/** Point halfway along the drawn wire (where its bend handle sits). */
+export function wireMid(wire: Pick<Wire, 'a' | 'b' | 'via'>, arc = true): Pt {
+  if (wire.via) return wire.via;
+  if (!arc) return { x: (wire.a.x + wire.b.x) / 2, y: (wire.a.y + wire.b.y) / 2 };
+  const c = wireControl(wire.a, wire.b);
+  return { x: 0.25 * wire.a.x + 0.5 * c.x + 0.25 * wire.b.x, y: 0.25 * wire.a.y + 0.5 * c.y + 0.25 * wire.b.y };
+}
+
 /** Wire under point w; `arc` matches the curved breadboard rendering. */
 export function hitWire(doc: CircuitDoc, w: Pt, arc = false, tol = 0.45): Wire | null {
   let best: Wire | null = null;
   let bd = tol;
   for (const wire of doc.wires) {
     let d: number;
-    if (arc) {
-      const c = wireControl(wire.a, wire.b);
+    if (!arc && wire.via) {
+      d = Math.min(segDist(w, wire.a, wire.via), segDist(w, wire.via, wire.b));
+    } else if (arc) {
+      const c = wireCurveControl(wire);
       d = Infinity;
       let prev = wire.a;
       for (let k = 1; k <= 16; k++) {

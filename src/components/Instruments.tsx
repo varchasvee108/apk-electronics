@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
   lcdValue: { color: '#C9FBE5', fontSize: 40, fontFamily: MONO, fontWeight: '700' },
   lcdBeep: { color: '#FFD166', fontWeight: '700', marginTop: 4 },
   screen: { borderRadius: R.md, overflow: 'hidden', borderWidth: 1, borderColor: C.border, alignSelf: 'flex-start', marginTop: S.xs },
-  screenInfo: { position: 'absolute', right: 6, top: 4, backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 6, borderRadius: 6 },
+  screenInfo: { position: 'absolute', right: 6, top: 4, backgroundColor: C.surface, paddingHorizontal: 6, borderRadius: 6 },
   chRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' },
   chDot: { width: 12, height: 12, borderRadius: 6 },
   serial: { height: 200, backgroundColor: C.surface2, borderRadius: R.md, borderWidth: 1, borderColor: C.border, marginTop: S.sm },

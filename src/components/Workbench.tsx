@@ -1,13 +1,17 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions, type HostInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { create } from 'zustand';
 import type { Diagnostic } from '@sim/types';
 import { formatEng } from '@sim/units';
 import { BenchCanvas, type CanvasApi } from '@/canvas/BenchCanvas';
-import { evaluate, newMemory, remember, type CheckMemory, type CheckResult } from '@/model/lessonCheck';
-import { LESSONS, type Lesson } from '@/model/lessons';
+import { newMemory, remember, type CheckMemory, type CheckResult } from '@/model/lessonCheck';
+import { LESSONS } from '@/model/lessons';
+import type { PracticeLesson as Lesson } from '@/model/learning/types';
+import { evaluateLearningCheck, originalChecks } from '@/model/learning/checks';
+import { findLesson, nextLesson } from '@/model/learning/curriculum';
+import { explainLive } from '@/model/learning/live-explanation';
 import { partDef, partLabel } from '@/model/parts';
 import { WIRE_COLORS, newId, type CircuitDoc } from '@/model/types';
 import { confirm, notify } from '@/lib/dialog';
@@ -16,10 +20,19 @@ import { controller } from '@/sim/controller';
 import { useSim } from '@/sim/store';
 import { useCircuit, type ViewMode } from '@/store/circuit';
 import { saveCircuit, setProgress } from '@/store/db';
+import { recordActivity } from '@/store/stats';
 import { C, R, S, T, TOUCH } from '@/theme';
 import { Inspector } from './Inspector';
 import { Instruments, type InstrumentTab } from './Instruments';
-import { PartsTray } from './PartsTray';
+import { PartsTray, type TrayDrop, type TrayOver } from './PartsTray';
+import { useTrayDrag } from '@/store/trayDrag';
+import { BuildAlongPanel } from './BuildAlong';
+import { fixesFor, plugInFixes, type Fix } from '@/model/fixes';
+import * as haptic from '@/lib/haptics';
+import { play } from '@/lib/sound';
+import { useCircuitFeedback } from '@/sim/useCircuitFeedback';
+import { ShareSheet } from './ShareSheet';
+import { usePrefs } from '@/store/prefs';
 import { Badge, Button, Card, Chip, Icon, IconButton, Segmented, Toggle } from './ui';
 
 type PanelTab = 'parts' | 'inspect' | 'instruments' | 'lesson';
@@ -35,15 +48,18 @@ const SPEEDS: { value: number; label: string }[] = [
   { value: 1e-6, label: '1 µs per second' },
 ];
 
-export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialDoc: CircuitDoc; persist: boolean; lesson?: Lesson; autoPower?: boolean }) {
+export function Workbench({ initialDoc, persist, lesson, autoPower, guide }: { initialDoc: CircuitDoc; persist: boolean; lesson?: Lesson; autoPower?: boolean; guide?: CircuitDoc }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const wide = width >= 760 && width > height * 1.05;
+  // tablets in portrait: the bottom panel holds the parts tray and the other tabs side by side
+  const tablet = !wide && width >= 700;
+  const trayInTabs = !wide && !tablet;
   const doc = useCircuit((s) => s.doc);
   const dirty = useCircuit((s) => s.dirty);
   const selection = useCircuit((s) => s.selection);
   const view = useCircuit((s) => s.view);
-  const [tab, setTab] = useState<PanelTab>(lesson ? 'lesson' : wide ? 'inspect' : 'parts');
+  const [tab, setTab] = useState<PanelTab>(lesson || guide ? 'lesson' : wide || tablet ? 'inspect' : 'parts');
   // evaluated here, not in the lesson tab, so time-based checks keep counting while another tab is open
   const lessonDone = useLessonStore((s) => s.done);
   // show the success message as soon as the goal is reached, whichever tab is open
@@ -52,6 +68,13 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
     setShownDone(lessonDone);
     if (lessonDone && lesson) setTab('lesson');
   }
+  useEffect(() => {
+    if (lessonDone && lesson) {
+      play('chime');
+      haptic.success();
+    }
+  }, [lessonDone, lesson]);
+  useCircuitFeedback();
   const [instTab, setInstTab] = useState<InstrumentTab>('meter');
   const [showParts, setShowParts] = useState(true);
   const [showVoltage, setShowVoltage] = useState(false);
@@ -59,6 +82,7 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   const [diagOpen, setDiagOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [speedOpen, setSpeedOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const api = useRef<CanvasApi | null>(null);
 
@@ -107,16 +131,39 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
   }, []);
   const center = useCallback(() => api.current?.center() ?? { x: 30, y: 10 }, []);
 
+  // drag-from-tray: the canvas rectangle in window coordinates
+  const canvasRef = useRef<HostInstance>(null);
+  const canvasRect = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const measureCanvas = useCallback(() => {
+    canvasRef.current?.measureInWindow((x: number, y: number, w: number, h: number) => {
+      canvasRect.current = { x, y, w, h };
+    });
+  }, []);
+  const isOver: TrayOver = useCallback((ax, ay) => {
+    const r = canvasRect.current;
+    return ax >= r.x && ax <= r.x + r.w && ay >= r.y && ay <= r.y + r.h;
+  }, []);
+  const onTrayDrop: TrayDrop = useCallback(
+    (type, ax, ay) => {
+      measureCanvas();
+      if (!isOver(ax, ay) || !api.current) return false;
+      const r = canvasRect.current;
+      return api.current.dropPart(type, ax - r.x, ay - r.y) !== null;
+    },
+    [isOver, measureCanvas],
+  );
+
   const panel = (
     <View style={{ flex: 1 }}>
       <View style={styles.tabs}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
           <Segmented<PanelTab>
             options={[
-              ...(!wide ? [{ value: 'parts' as const, label: 'Parts' }] : []),
+              ...(trayInTabs ? [{ value: 'parts' as const, label: 'Parts' }] : []),
               { value: 'inspect', label: 'Inspect' },
               { value: 'instruments', label: 'Instruments' },
               ...(lesson ? [{ value: 'lesson' as const, label: lesson.challenge ? 'Challenge' : 'Lesson' }] : []),
+              ...(guide ? [{ value: 'lesson' as const, label: 'Build' }] : []),
             ]}
             value={tab}
             onChange={(t) => {
@@ -129,12 +176,20 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
           <IconButton icon={collapsed ? 'chevron-up' : 'chevron-down'} label={collapsed ? 'Expand panel' : 'Collapse panel'} onPress={() => setCollapsed(!collapsed)} />
         )}
       </View>
-      <View style={{ flex: 1, display: collapsed && !wide ? 'none' : 'flex' }}>
-        {tab === 'parts' && <PartsTray center={center} onAdded={() => setTab('inspect')} />}
+      <View style={{ flex: 1, display: collapsed && !wide ? 'none' : 'flex', flexDirection: tablet ? 'row' : 'column' }}>
+        {tablet && (
+          <View style={styles.tabletTray}>
+            <PartsTray center={center} onDrop={view === 'netlist' ? undefined : onTrayDrop} isOver={isOver} />
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+        {tab === 'parts' && trayInTabs && <PartsTray center={center} onAdded={() => setTab('inspect')} onDrop={view === 'netlist' ? undefined : onTrayDrop} isOver={isOver} />}
         {tab === 'inspect' && <Inspector />}
         {tab === 'instruments' && <Instruments tab={instTab} setTab={setInstTab} />}
         {lesson && <LessonTracker lesson={lesson} />}
         {tab === 'lesson' && lesson && <LessonPanel lesson={lesson} />}
+        {tab === 'lesson' && guide && <BuildAlongPanel target={guide} />}
+        </View>
       </View>
     </View>
   );
@@ -147,10 +202,10 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
       <View style={[styles.body, !wide && { flexDirection: 'column' }]}>
         {wide && showParts && (
           <View style={styles.left}>
-            <PartsTray center={center} />
+            <PartsTray center={center} onDrop={view === 'netlist' ? undefined : onTrayDrop} isOver={isOver} />
           </View>
         )}
-        <View style={styles.canvasWrap}>
+        <View style={styles.canvasWrap} ref={canvasRef} onLayout={measureCanvas} collapsable={false}>
           {view === 'netlist' ? <NetlistView /> : <BenchCanvas onReady={onReady} showVoltage={showVoltage} showFlow={showFlow} />}
           <ToolStrip
             wide={wide}
@@ -164,12 +219,31 @@ export function Workbench({ initialDoc, persist, lesson, autoPower }: { initialD
             zoom={(f) => api.current?.zoom(f)}
           />
         </View>
-        <View style={wide ? styles.right : [styles.bottom, { height: collapsed ? 66 : Math.max(260, height * 0.42) }]}>{panel}</View>
+        <View style={wide ? styles.right : [styles.bottom, { height: collapsed ? 66 : Math.max(260, height * (tablet ? 0.38 : 0.42)) }]}>{panel}</View>
       </View>
       <StatusBar onDiagnostics={() => setDiagOpen(true)} bottomInset={insets.bottom} wide={wide} />
       <DiagnosticsSheet open={diagOpen} onClose={() => setDiagOpen(false)} />
-      <MoreMenu open={menuOpen} onClose={() => setMenuOpen(false)} persist={persist} snapshot={() => api.current?.snapshot() ?? null} />
+      <MoreMenu open={menuOpen} onClose={() => setMenuOpen(false)} persist={persist} snapshot={() => api.current?.snapshot() ?? null} onShare={() => setShareOpen(true)} />
+      <ShareSheet doc={doc} open={shareOpen} onClose={() => setShareOpen(false)} />
       <SpeedMenu open={speedOpen} onClose={() => setSpeedOpen(false)} />
+      <TrayGhost />
+    </View>
+  );
+}
+
+/** The part following the finger while it is dragged out of the parts tray. */
+function TrayGhost() {
+  const { type, name, x, y, over } = useTrayDrag();
+  if (!type) return null;
+  return (
+    <View pointerEvents="none" style={[styles.ghost, { left: x - 70, top: y - 74 }, over && styles.ghostOver]}>
+      <Icon name={over ? 'add-circle' : 'hand-left-outline'} size={18} color={over ? C.surface : C.ink2} />
+      <View>
+        <Text style={[T.label, over && { color: C.surface }]} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={[T.caption, over && { color: C.accentSoft }]}>{over ? 'Release to place' : 'Drag onto the board'}</Text>
+      </View>
     </View>
   );
 }
@@ -277,8 +351,11 @@ function ToolStrip(props: {
   const board = useCircuit((s) => s.doc.board);
   const wireColor = useCircuit((s) => s.wireColor);
   const canUndo = useCircuit((s) => s.past.length > 0);
+  // phones: the palette opens on demand, otherwise it would sit over the top power rails
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const st = useCircuit.getState();
   if (view === 'netlist') return null;
+  const showPalette = tool === 'wire' && (props.wide || paletteOpen);
   return (
     <>
       <View style={[styles.strip, { left: S.sm, top: S.sm }]}>
@@ -290,21 +367,35 @@ function ToolStrip(props: {
           <IconButton icon="swap-horizontal" label="Toggle breadboard / schematic" onPress={() => st.setView(view === 'schematic' && board === 'breadboard' ? 'breadboard' : 'schematic')} />
         )}
         {!props.wide && <IconButton icon="arrow-undo" label="Undo" disabled={!canUndo} onPress={st.undo} />}
+        {!props.wide && tool === 'wire' && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Wire colour"
+            onPress={() => setPaletteOpen(!paletteOpen)}
+            style={styles.swatchBtn}
+          >
+            <View style={[styles.colorDot, { backgroundColor: wireColor, width: 28, height: 28 }]} />
+          </Pressable>
+        )}
       </View>
-      {tool === 'wire' && (
+      {showPalette && (
         <View style={[styles.strip, styles.colors, { left: S.sm, top: S.sm + 64, flexWrap: 'wrap', maxWidth: props.wide ? undefined : 200 }]}>
           {WIRE_COLORS.map((c) => (
             <Pressable
               key={c.value}
               accessibilityRole="button"
               accessibilityLabel={`${c.name} wire colour`}
-              onPress={() => st.setWireColor(c.value)}
+              onPress={() => {
+                st.setWireColor(c.value);
+                setPaletteOpen(false);
+              }}
               style={[styles.colorDot, { backgroundColor: c.value }, wireColor === c.value && { borderColor: C.ink, borderWidth: 3 }]}
             />
           ))}
         </View>
       )}
-      <View style={[styles.strip, { right: S.sm, top: props.wide ? S.sm : S.sm + 64 }]}>
+      {/* on a phone the view controls sit at the bottom so they don't cover the power rails */}
+      <View style={[styles.strip, props.wide ? { right: S.sm, top: S.sm } : { right: S.sm, bottom: S.sm }]}>
         <IconButton icon="remove-circle-outline" label="Zoom out" onPress={() => props.zoom(1 / 1.4)} />
         <IconButton icon="add-circle-outline" label="Zoom in" onPress={() => props.zoom(1.4)} />
         <IconButton icon="contract-outline" label="Fit to view" onPress={props.fit} />
@@ -350,10 +441,36 @@ function StatusBar({ onDiagnostics, bottomInset, wide }: { onDiagnostics: () => 
   );
 }
 
+/** Run a fix: replace damaged parts in the simulator, then make the document changes (one undo step). */
+function runFix(fix: Fix): void {
+  for (const op of fix.ops) if (op.kind === 'repair') controller.repair(op.partId);
+  useCircuit.getState().applyFix(fix);
+  haptic.success();
+}
+
+function FixButtons({ fixes }: { fixes: Fix[] }) {
+  if (!fixes.length) return null;
+  return (
+    <View style={{ marginTop: S.sm, gap: S.xs }}>
+      {fixes.map((f, i) => (
+        <View key={i}>
+          <Button icon="construct-outline" label={`Fix it: ${f.label}`} kind="primary" onPress={() => runFix(f)} />
+          <Text style={[T.caption, { marginTop: 2 }]}>{f.detail}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function DiagnosticsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const diags = useSim((s) => s.diagnostics);
   const error = useSim((s) => s.error);
-  const all: Diagnostic[] = [...(error ? [error] : []), ...diags];
+  const doc = useCircuit((s) => s.doc);
+  const ex = useSim((s) => s.ex);
+  const all: Diagnostic[] = useMemo(() => [...(error ? [error] : []), ...diags], [error, diags]);
+  // fixes are only worked out while the sheet is open
+  const fixes = useMemo(() => (open ? all.map((d) => fixesFor(d, doc, ex)) : []), [open, all, doc, ex]);
+  const loose = useMemo(() => (open ? plugInFixes(doc) : []), [open, doc]);
   const show = (d: Diagnostic) => {
     const st = useCircuit.getState();
     if (d.partId) st.select({ parts: [d.partId] });
@@ -369,7 +486,17 @@ function DiagnosticsSheet({ open, onClose }: { open: boolean; onClose: () => voi
           <IconButton icon="close" label="Close" onPress={onClose} />
         </View>
         <ScrollView contentContainerStyle={{ padding: S.lg, gap: S.sm }}>
-          {all.length === 0 && <Text style={T.body}>No problems found. Power on to check for overloads and damaged parts.</Text>}
+          {all.length === 0 && !loose.length && <Text style={T.body}>No problems found. Power on to check for overloads and damaged parts.</Text>}
+          {loose.length > 0 && (
+            <Card>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm }}>
+                <Icon name="warning" color={C.warn} />
+                <Text style={[T.label, { flex: 1 }]}>Leads not plugged in</Text>
+              </View>
+              <Text style={[T.small, { marginTop: 6 }]}>Leads marked with a red ring are over the centre channel or a gap between holes, so they connect to nothing.</Text>
+              <FixButtons fixes={loose} />
+            </Card>
+          )}
           {all.map((d, i) => (
             <Card key={i}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm }}>
@@ -381,6 +508,7 @@ function DiagnosticsSheet({ open, onClose }: { open: boolean; onClose: () => voi
                 {(d.partId || d.node !== undefined) && <Chip label="Show" onPress={() => show(d)} />}
               </View>
               <Text style={[T.small, { marginTop: 6 }]}>{d.message}</Text>
+              <FixButtons fixes={fixes[i] ?? []} />
             </Card>
           ))}
         </ScrollView>
@@ -391,9 +519,10 @@ function DiagnosticsSheet({ open, onClose }: { open: boolean; onClose: () => voi
 
 // ------------------------------------------------------------------ menus
 
-function MoreMenu({ open, onClose, persist, snapshot }: { open: boolean; onClose: () => void; persist: boolean; snapshot: () => string | null }) {
+function MoreMenu({ open, onClose, persist, snapshot, onShare }: { open: boolean; onClose: () => void; persist: boolean; snapshot: () => string | null; onShare: () => void }) {
   const doc = useCircuit((s) => s.doc);
   const [failures, setFailures] = useState(controller.failures);
+  const prefs = usePrefs();
   const st = useCircuit.getState();
   const act = (fn: () => void | Promise<void>) => async () => {
     onClose();
@@ -430,6 +559,7 @@ function MoreMenu({ open, onClose, persist, snapshot }: { open: boolean; onClose
             })}
           />
         )}
+        <MenuItem icon="qr-code-outline" label="Share as QR code / link" onPress={act(onShare)} />
         <MenuItem icon="share-outline" label="Export as JSON" onPress={act(() => exportCircuit(doc))} />
         <MenuItem
           icon="camera-outline"
@@ -452,6 +582,8 @@ function MoreMenu({ open, onClose, persist, snapshot }: { open: boolean; onClose
               controller.setFailures(v);
             }}
           />
+          <Toggle label="Sounds (buzzers, pops)" value={prefs.sounds} onChange={(v) => prefs.set({ sounds: v })} />
+          <Toggle label="Haptic feedback" value={prefs.haptics} onChange={(v) => prefs.set({ haptics: v })} />
         </View>
         <MenuItem
           icon="trash-outline"
@@ -576,14 +708,18 @@ function LessonTracker({ lesson }: { lesson: Lesson }) {
     mem.current = newMemory();
     useLessonStore.setState({ results: [], done: false });
     setProgress(lesson.id, 'started');
+    recordActivity();
   }, [lesson]);
   useEffect(() => {
     const ctx = { doc, snap, ex, mem: mem.current, trace: controller.trace, serial: (id: string) => controller.serialText(id) };
-    remember(lesson.checks, ctx);
-    const results = lesson.checks.map((c) => evaluate(c, ctx));
+    remember(originalChecks(lesson.checks), ctx);
+    const results = lesson.checks.map((c) => evaluateLearningCheck(c, ctx));
     const wasDone = useLessonStore.getState().done;
     const done = wasDone || (!!snap && results.every((x) => x.ok));
-    if (done && !wasDone) setProgress(lesson.id, 'done');
+    if (done && !wasDone) {
+      setProgress(lesson.id, 'done');
+      recordActivity();
+    }
     useLessonStore.setState({ results, done });
   }, [doc, snap, ex, lesson]);
   return null;
@@ -595,7 +731,11 @@ function LessonPanel({ lesson }: { lesson: Lesson }) {
   const results = useLessonStore((s) => s.results);
   const done = useLessonStore((s) => s.done);
   const idx = LESSONS.findIndex((l) => l.id === lesson.id);
-  const next = idx >= 0 ? LESSONS[idx + 1] : undefined;
+  const content = useMemo(() => findLesson(lesson.id), [lesson.id]);
+  const next = idx >= 0 ? LESSONS[idx + 1] : content ? nextLesson(content) : undefined;
+  const doc = useCircuit((s) => s.doc);
+  const [showExplanation, setShowExplanation] = useState(false);
+  const live = useMemo(() => showExplanation && content ? explainLive(content, doc, snap, { uno: controller.serialText('uno') }) : undefined, [showExplanation, content, doc, snap]);
   return (
     <ScrollView contentContainerStyle={{ padding: S.lg, paddingBottom: 60 }}>
       <Text style={T.caption}>{lesson.challenge ? 'Challenge' : `Lesson · ~${lesson.minutes} min`}</Text>
@@ -637,6 +777,11 @@ function LessonPanel({ lesson }: { lesson: Lesson }) {
           {hints < lesson.hints.length && <Button icon="bulb-outline" label={hints ? 'Another hint' : 'Show a hint'} onPress={() => setHints(hints + 1)} style={{ marginTop: S.sm }} />}
         </>
       )}
+      {content && <>
+        <Button icon="school-outline" label="Explanation & knowledge check" style={{marginTop:S.lg}} onPress={() => router.push(`/learn/study/${lesson.id}?from=circuit`)} />
+        <Button icon="bulb-outline" label={showExplanation ? 'Hide live explanation' : 'Explain the live reading'} style={{marginTop:S.sm}} onPress={() => setShowExplanation(!showExplanation)} />
+        {live && <Card style={{marginTop:S.md}}><Text style={T.label}>{live.title}</Text><Text style={[T.body,{marginTop:S.sm}]}>{live.text}</Text><Text style={[T.caption,{marginTop:S.sm}]}>{live.evidence}</Text></Card>}
+      </>}
     </ScrollView>
   );
 }
@@ -671,6 +816,26 @@ const styles = StyleSheet.create({
   },
   colors: { gap: 6, padding: 8 },
   colorDot: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: C.border },
+  ghost: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.sm,
+    minWidth: 140,
+    paddingVertical: S.sm,
+    paddingHorizontal: S.md,
+    borderRadius: R.lg,
+    backgroundColor: C.surface,
+    borderWidth: 2,
+    borderColor: C.borderStrong,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+  },
+  ghostOver: { backgroundColor: C.accent, borderColor: C.accent },
+  tabletTray: { width: 300, borderRightWidth: 1, borderRightColor: C.border },
+  swatchBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   status: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: S.md, paddingTop: 4, backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border, minHeight: 44 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   diagBtn: { flexDirection: 'row', gap: 6, minHeight: 40, alignItems: 'center', paddingHorizontal: 4 },
