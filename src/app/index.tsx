@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/ui';
-import { LESSONS } from '@/model/lessons';
+import { LEARNING_LESSONS as LESSONS } from '@/model/learning/curriculum';
 import { emptyDoc } from '@/model/types';
 import { getProgress, listCircuits, saveCircuit, type CircuitRow } from '@/store/db';
 import { C, R, S, T } from '@/theme';
@@ -28,7 +28,8 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       setRecent(listCircuits().slice(0, 4));
-      setDone(Object.values(getProgress()).filter((s) => s === 'done').length);
+      const progress = getProgress();
+      setDone(LESSONS.filter(l => progress[l.id] === 'done').length);
     }, []),
   );
   const create = (board: 'breadboard' | 'none') => {
@@ -48,6 +49,9 @@ export default function Home() {
           <Text style={T.hero}>Bench</Text>
           <Text style={[T.body, { color: C.ink2 }]}>An electronics lab in your hands: build on a breadboard, power it on, watch it work.</Text>
         </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => router.push('/settings')} style={styles.gear}>
+          <Icon name="settings-outline" size={22} color={C.ink2} />
+        </Pressable>
       </View>
 
       <Text style={styles.section}>Build</Text>
@@ -80,6 +84,18 @@ export default function Home() {
         <View style={{ width: tileW }}>
           <Tile icon="book-outline" title="Library" sub="Datasheets & glossary" onPress={() => router.push('/library')} tone={C.info} />
         </View>
+        <View style={{ width: tileW }}>
+          <Tile icon="bug-outline" title="Fix the circuit" sub="Fault-finding practice" onPress={() => router.push('/troubleshoot')} tone={C.danger} />
+        </View>
+        <View style={{ width: tileW }}>
+          <Tile icon="stats-chart-outline" title="Your progress" sub="Streak, badges, what next" onPress={() => router.push('/progress')} tone={C.ok} />
+        </View>
+        <View style={{ width: tileW }}>
+          <Tile icon="calculator-outline" title="Tools" sub="Calculators, logic, Pi pins" onPress={() => router.push('/tools')} tone="#8E4EC6" />
+        </View>
+        <View style={{ width: tileW }}>
+          <Tile icon="reader-outline" title="Reference" sub="Colour codes, formulas, pinouts" onPress={() => router.push('/reference')} tone={C.warn} />
+        </View>
       </View>
 
       {recent.length > 0 && (
@@ -111,6 +127,7 @@ export default function Home() {
 const styles = StyleSheet.create({
   page: { padding: S.xl, paddingBottom: 60, maxWidth: 1100, width: '100%', alignSelf: 'center' },
   hero: { flexDirection: 'row', alignItems: 'center', gap: S.lg, marginBottom: S.lg },
+  gear: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface, borderWidth: 1, borderColor: C.border },
   logo: { width: 56, height: 56, borderRadius: 16, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
   section: { fontSize: 13, fontWeight: '700', color: C.ink3, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: S.xl, marginBottom: S.md },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: S.md },

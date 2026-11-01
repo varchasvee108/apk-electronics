@@ -1,10 +1,11 @@
-import { Platform } from 'react-native';
+import { Appearance, Platform } from 'react-native';
+import { readPrefs } from '@/store/prefs';
 
 /** Monospace family that exists on each platform ('monospace' is Android/web only). */
 export const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' }) as string;
 
-/** Bench uses a single light theme: calm neutrals, one teal accent, semantic status colours. */
-export const C = {
+/** Light palette: calm neutrals, one teal accent, semantic status colours. */
+const LIGHT = {
   bg: '#F3F4F6',
   surface: '#FFFFFF',
   surface2: '#F8F9FA',
@@ -39,7 +40,69 @@ export const C = {
   scopeBg: '#FBFCFD',
   scopeGrid: '#E4E8EE',
   trace: ['#E5484D', '#3E63DD', '#2F9E44', '#C2410C'],
-} as const;
+};
+
+/** Dark palette (same keys). */
+const DARK: typeof LIGHT = {
+  bg: '#0F1216',
+  surface: '#171B21',
+  surface2: '#1C2128',
+  sunken: '#232932',
+  border: '#2A313B',
+  borderStrong: '#3A4350',
+  ink: '#ECEFF3',
+  ink2: '#C3CAD3',
+  ink3: '#929BA7',
+  inkFaint: '#6A7380',
+  accent: '#2BB39C',
+  accentInk: '#6FD9C4',
+  accentSoft: '#143A35',
+  danger: '#F06A6A',
+  dangerSoft: '#3A1E21',
+  warn: '#E9A44A',
+  warnSoft: '#3A2C17',
+  ok: '#4CC27C',
+  okSoft: '#17331F',
+  info: '#6A9BEA',
+  infoSoft: '#1A2A44',
+  power: '#3FBF5A',
+  canvas: '#C8CCD2',
+  canvasDot: '#B2B8C0',
+  board: '#F2F0EA',
+  boardShade: '#E6E2D8',
+  boardEdge: '#D2CCBE',
+  hole: '#4A4F57',
+  railRed: '#E5484D',
+  railBlue: '#3E63DD',
+  select: '#2BB39C',
+  scopeBg: '#10161B',
+  scopeGrid: '#24303A',
+  trace: ['#FF6B6F', '#6E8EFF', '#4CD06A', '#F28A3C'],
+};
+
+function pickDark(): boolean {
+  let pref: string = 'system';
+  try {
+    pref = readPrefs().theme;
+  } catch {
+    // storage not ready: follow the system
+  }
+  if (pref === 'dark') return true;
+  if (pref === 'light') return false;
+  return Appearance.getColorScheme() === 'dark';
+}
+
+/** True when the app runs in dark mode (chosen at launch; changing it restarts the app). */
+export const IS_DARK = pickDark();
+
+/** UI colours for the active theme. */
+export const C = IS_DARK ? DARK : LIGHT;
+
+/**
+ * Colours for drawings on the bench canvas. Parts keep their real-world look in both themes, so the
+ * canvas is always a lit work mat (a little dimmer in dark mode); select / accent follow the theme.
+ */
+export const CANVAS: typeof LIGHT = IS_DARK ? { ...LIGHT, canvas: DARK.canvas, canvasDot: DARK.canvasDot } : LIGHT;
 
 export const R = { sm: 8, md: 12, lg: 16, pill: 999 } as const;
 export const S = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
