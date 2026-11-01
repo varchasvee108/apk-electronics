@@ -2,6 +2,7 @@ import { assemble } from '@sim/avr/assembler';
 import { STARTER_PROGRAMS } from '@sim/avr/programs';
 import { DocBuilder, WIRE, addRails, dipHole, railNear } from './build';
 import type { CircuitDoc } from './types';
+import { MODULE_EXAMPLES } from './examples2';
 
 export interface Example {
   id: string;
@@ -444,6 +445,7 @@ export const EXAMPLES: Example[] = [
       return b.build('example');
     },
   },
+  ...MODULE_EXAMPLES,
 ];
 
 export function exampleById(id: string): Example | undefined {

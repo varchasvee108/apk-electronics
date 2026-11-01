@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { Badge, Icon } from '@/components/ui';
+import { Badge, Chip, Icon } from '@/components/ui';
 import { EXAMPLES } from '@/model/examples';
 import { C, R, S, T } from '@/theme';
 
@@ -22,6 +22,10 @@ export default function ExamplesScreen() {
             {e.tags.map((t) => (
               <Badge key={t} text={t} tone="neutral" />
             ))}
+          </View>
+          <View style={[styles.row, { marginTop: S.xs }]}>
+            <Chip label="▶ Open" onPress={() => router.push(`/bench/example-${e.id}`)} />
+            <Chip label="🔧 Build it step by step" onPress={() => router.push(`/build/${e.id}`)} />
           </View>
         </Pressable>
       ))}

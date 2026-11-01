@@ -21,6 +21,7 @@ import {
 import type { ElementSpec, Params } from '@sim/types';
 import { formatEng } from '@sim/units';
 import type { PartInstance, Props } from './types';
+import { BATTERY_CAPACITIES, MODULE_PARTS, capacityLabel } from './modules';
 
 export type Category =
   | 'Sources'
@@ -29,6 +30,7 @@ export type Category =
   | 'Analog ICs'
   | 'Digital ICs'
   | 'Switches & sensors'
+  | 'Drivers & modules'
   | 'Output'
   | 'Microcontroller';
 
@@ -39,6 +41,7 @@ export const CATEGORIES: Category[] = [
   'Analog ICs',
   'Digital ICs',
   'Switches & sensors',
+  'Drivers & modules',
   'Output',
   'Microcontroller',
 ];
@@ -128,7 +131,7 @@ const battery: PartDef = {
     { name: '−', dx: 3, dy: 0 },
   ],
   box: { x: -0.8, y: 0.6, w: 4.6, h: 6.4 },
-  defaults: { v: 9 },
+  defaults: { v: 9, drain: false, mah: 500 },
   offBoard: true,
   props: [
     {
@@ -138,13 +141,17 @@ const battery: PartDef = {
       unit: 'V',
       options: [1.5, 3, 4.5, 6, 9, 12].map((v) => ({ value: v, label: `${v} V` })),
     },
+    { key: 'drain', label: 'Runs down (realistic)', kind: 'bool' },
+    { key: 'mah', label: 'Capacity', kind: 'enum', options: BATTERY_CAPACITIES.map((c) => ({ value: c, label: capacityLabel(c) })) },
   ],
   expand(p, ctx) {
     const v = n(p.props.v, 9);
     const r = v === 9 ? 1.7 : v === 12 ? 0.6 : 0.15 * (v / 1.5);
-    return [el(ctx, '', 'V', [ctx.pin(0), ctx.pin(1)], { v, r, maxI: v === 9 ? 0.5 : 2 })];
+    const maxI = v === 9 ? 0.5 : 2;
+    if (b(p.props.drain, false)) return [el(ctx, '', 'cell', [ctx.pin(0), ctx.pin(1)], { v, r, maxI, mah: n(p.props.mah, 500) })];
+    return [el(ctx, '', 'V', [ctx.pin(0), ctx.pin(1)], { v, r, maxI })];
   },
-  value: (p) => `${n(p.v, 9)} V`,
+  value: (p) => `${n(p.v, 9)} V${b(p.drain, false) ? ` · ${capacityLabel(n(p.mah, 500))}` : ''}`,
   info: {
     summary: 'A chemical cell (or pack of cells) that supplies a nearly constant DC voltage.',
     pinout: ['+ : positive terminal', '− : negative terminal'],
@@ -408,7 +415,7 @@ const cap: PartDef = {
     { name: '1', dx: 0, dy: 0 },
     { name: '2', dx: 2, dy: 0 },
   ],
-  box: { x: 0.25, y: -0.8, w: 1.5, h: 1.0 },
+  box: { x: 0.15, y: -2.0, w: 1.7, h: 2.1 },
   defaults: { c: 100e-9, vmax: 50 },
   props: [
     { key: 'c', label: 'Capacitance', unit: 'F', ...VALUE_STEP },
@@ -438,7 +445,7 @@ const ecap: PartDef = {
     { name: '+', dx: 0, dy: 0 },
     { name: '−', dx: 2, dy: 0 },
   ],
-  box: { x: -0.2, y: -1.2, w: 2.4, h: 2.4 },
+  box: { x: -0.3, y: -3.0, w: 2.6, h: 3.2 },
   defaults: { c: 100e-6, vmax: 25 },
   props: [
     { key: 'c', label: 'Capacitance', unit: 'F', ...VALUE_STEP },
@@ -649,7 +656,7 @@ const ledPart: PartDef = {
     { name: 'A', dx: 0, dy: 0 },
     { name: 'K', dx: 1, dy: 0 },
   ],
-  box: { x: -0.55, y: -1.6, w: 2.1, h: 1.9 },
+  box: { x: -0.45, y: -2.0, w: 1.9, h: 2.3 },
   defaults: { color: 'red' },
   props: [{ key: 'color', label: 'Colour', kind: 'enum', options: OPTIONS_LED }],
   expand: (p, ctx) => [el(ctx, '', 'D', [ctx.pin(0), ctx.pin(1)], led(s(p.props.color, 'red') as LedColor))],
@@ -1267,7 +1274,7 @@ const lamp: PartDef = {
     { name: '1', dx: 0, dy: 0 },
     { name: '2', dx: 4, dy: 0 },
   ],
-  box: { x: 0.25, y: -3.5, w: 3.5, h: 3.8 },
+  box: { x: 0.25, y: -4.1, w: 3.5, h: 4.4 },
   defaults: { type: '6:0.2' },
   props: [{ key: 'type', label: 'Bulb', kind: 'enum', options: LAMP_TYPES }],
   expand(p, ctx) {
@@ -1350,7 +1357,7 @@ const buzzer: PartDef = {
       ['Voltage', '3–6 V (sounds above ≈2 V)'],
       ['Current', '≈25 mA at 5 V'],
     ],
-    how: 'An active buzzer contains a driver circuit and a piezo or magnetic transducer. Bench models it electrically as a resistive load with reverse blocking and shows when it would sound. (Bench does not play audio.)',
+    how: 'An active buzzer contains a driver circuit and a piezo or magnetic transducer. Bench models it electrically as a resistive load with reverse blocking and plays its ≈2.3 kHz beep while it has more than 2 V across it. For tunes, use a passive buzzer (piezo) instead.',
     typical: ['Alarm driven by a transistor', 'Arduino beeper'],
   },
 };
@@ -1660,6 +1667,7 @@ export const PART_LIST: PartDef[] = [
   potsensor,
   lm35,
   arduino,
+  ...MODULE_PARTS,
 ];
 
 export const PARTS: Record<string, PartDef> = Object.fromEntries(PART_LIST.map((d) => [d.type, d]));

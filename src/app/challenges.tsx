@@ -31,5 +31,5 @@ export default function ChallengesScreen() {
 const styles = StyleSheet.create({
   page: { padding: S.lg, gap: S.md, paddingBottom: 60, maxWidth: 900, width: '100%', alignSelf: 'center' },
   card: { flexDirection: 'row', alignItems: 'center', gap: S.md, backgroundColor: C.surface, borderRadius: R.lg, borderWidth: 1, borderColor: C.border, padding: S.lg },
-  icon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FFF1E6', alignItems: 'center', justifyContent: 'center' },
+  icon: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.warnSoft, alignItems: 'center', justifyContent: 'center' },
 });
