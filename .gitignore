@@ -44,3 +44,12 @@ example
 
 # CanvasKit for the web build (copied by `npm install` via setup-skia-web)
 public/canvaskit.wasm
+
+# build outputs and local artifacts
+*.apk
+*.aab
+*.tar.gz
+.eas-local/
+test-results/
+playwright-report/
+blob-report/
