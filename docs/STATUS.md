@@ -45,7 +45,8 @@ Live-app spot checks (web build): the 555 example's scope auto-set measures **98
 - **Servo:** times each pulse on SIG with edge refinement; 1–2 ms maps to 0–180°; only moves while pulses keep arriving; supply current rises while moving. It starts at 0°.
 - **LM317 / LM35:** regulator model (smooth dropout) holding OUT 1.25 V above ADJ, or VOUT at 10 mV/°C.
 - **Electromechanical:** relays switch instantly at pull-in/drop-out current. The motor uses linear back-EMF with viscous friction, explicitly coupled per step.
-- **Sensors and buzzer:** LDR and thermistor are static resistors (no response time). The buzzer is visual only, with no audio.
+- **Sensors and buzzer:** LDR and thermistor are static resistors (no response time). The active buzzer plays a fixed ≈2.3 kHz beep; the passive piezo plays the frequency it measures from its drive signal (rounded to a semitone).
+- **Modules:** sensor modules are behavioural (PIR hold timer, comparator outputs, Thevenin analog outputs). The HC-SR04 echo width is exactly 2·d/343 m/s. The LCD implements the HD44780 command subset Arduino sketches use (no busy flag, no custom characters). The stepper is kinematic (no torque or missed steps). The draining battery uses Coulomb counting and a simple EMF curve.
 - **Arduino:** inputs and ADC refresh after each accepted solver step (≤ 0.5 ms latency). Emulating 16 MHz in JavaScript is CPU-bound, so the status bar shows when it runs below real time.
 - **Threading:** the solver runs on the JS thread in ≤ 10 ms slices; gestures and canvas animation run on the UI thread (see the architecture doc).
 - **Scope sampling:** while the scope or logic analyzer is open, steps are capped at time/div ÷ 15.
@@ -70,6 +71,24 @@ Live-app spot checks (web build): the 555 example's scope auto-set measures **98
 - Undo/redo cleared the selection, closing the inspector you were using.
 - Lesson checks that remember events (blinks, "the fuse blew", "LED on in the dark") were lost whenever another tab was opened, making the night-light challenge and the fuse lesson almost impossible in the app.
 - Selecting a part jumped away from an open instrument.
+
+## Version 1.3: building on a phone, sound, sensors, learning
+
+- **Building:** press and hold a part in the tray, then drag it onto the board. Haptic ticks as wire ends and parts snap onto holes. Wires can be bent around parts (drag the handle in the middle of a selected wire). "Fix it" buttons in the circuit check: add a ground, re-seat a bypassed or unplugged part, remove a shorting wire, turn a reversed part round, add a series resistor to an LED, replace a damaged part.
+- **Sound:** buzzers and piezos play through the speaker; fuse pops, burn-out cracks, relay clicks, and a chime when a goal is reached (Settings → sounds/haptics).
+- **17 new parts:** passive buzzer, 16×2 LCD, 28BYJ-48 stepper, L293D, ULN2003, HC-SR04, PIR, IR obstacle, Hall switch, joystick, soil moisture, MQ-2 gas, sound sensor, tilt and reed switches, flex and force sensors; batteries can run down. Five new Arduino programs (melody, LCD, ultrasonic, stepper, L293D) and 11 new examples.
+- **Learning:** 8 fault-finding lessons (Fix the circuit) and 8 sensor/module lessons, all verified by scripted learners. Build-along for every example. Progress screen with streak, badges, review list and a daily practice suggestion. Reference cheat sheets.
+- **App:** share a circuit as a QR code or link (bench://open?c=…), dark mode (Settings), tablet portrait layout, EAS Update channels, a faster sparse-row LU in the solver, readable part names in all messages.
+
+## Fixed in the mobile sweep
+
+- Wires could end in mid-air (off the board, in the centre channel, in rail gaps) and silently connect nothing. Wire ends now snap to the nearest hole or terminal within a fingertip's reach, with a green or red target ring while dragging; ends with nothing under them are refused, and the store enforces the same rule.
+- A meter probe tapped on a part's body sat on an unconnected point (or the empty hole under the part) and read 0 V. Probes now snap to holes and pins, and a tap on a body goes to that part's nearest lead.
+- Moving a meter probe while running showed 0 V (or a fraction of the real value) for a moment: the probe pair's sum restarted mid-interval but was divided by the whole interval.
+- Parts dropped with a lead over the centre channel or a rail gap are nudged into the nearest holes. Leads that are plugged into nothing get a red ring, and a part with both leads in one 5-hole strip is reported as "bypassed".
+- Deleting a battery or supply removes the jumpers clipped to its terminals.
+- Phone layout: the zoom/view buttons moved to the bottom corner, and the wire-colour palette opens from a swatch button instead of covering the top power rails.
+- Redrawn parts: ceramic disc and standing electrolytic capacitors (charge halo / gauge), a 5 mm LED with an epoxy dome and bloom, a screw bulb in a holder with a glowing filament, a shaded buzzer, plus shading on resistors, diodes and fuses.
 
 ## Next steps
 
